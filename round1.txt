@@ -1,0 +1,29 @@
+at every timestep:
+
+checking own trades (self.update_open_pos)
+- see if previously open position has been closed
+- match own buy and sell trades
+- CAUTION: Prosperity server seems to re-initialise Trader at random times (Trader suffers from amnesia!)
+
+tracking position
+- long and short shouldn’t cancel out - track buy and sell separately
+(since it’s possible for all buy orders but no sell order to be executed and vice versa)
+
+1. RESIN
+market take
+- if ask/bid below/above fairprice, want to buy a lot (how much?)
+- else: if previously bought very low, can sell at a lower price
+
+market make
+- fill remaining orders up to position limit
+- submit buy orders at lowest price possible
+- trade off between low price and probability of execution: use param1 to control proportion bought at low/lower prices
+- vice versa for sell orders
+
+
+
+2. KELP
+- market take: check fairprice based on market maker
+- since position limit is relatively large, don’t have to hurry to close all position
+- market make: send buy/sell orders below/above fp
+
