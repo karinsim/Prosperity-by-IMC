@@ -1,7 +1,7 @@
-# Prosperity3# 
+# Prosperity3
 
 
-###utils.py###
+###utils.py
 Contains utility functions to analyse the log output:
 \begin{enumerate}
 \item get_tradehistory: extracts all trades from the log file (including trades by other market participants) and returns a dataframe
