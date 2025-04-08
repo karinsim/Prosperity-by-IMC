@@ -1,48 +1,26 @@
 import streamlit as st
 import pandas as pd
-from utils import get_midprice_mm, get_orderbook, get_tradehistory, get_mytrades
+from utils import get_midprice_mm, get_tradehistory, get_mytrades
 
 
-price = pd.read_csv("data/ericliu.csv", delimiter=";")
-kelp = price.loc[price["product"]=="KELP"]
-mp = get_midprice_mm(kelp)
-kelp["mid_price"] = mp
-# get order book
-orderbook = get_orderbook("data/orderbook.log")
-# update true fairprice based on live orderbook
-for time in [57900, 82600, 130200]:
-    selldict = orderbook[time]["sell"]
-    buydict = orderbook[time]["buy"]
-    trueask = min(selldict, key=selldict.get)
-    truebid = max(buydict, key=buydict.get)
-    kelp.loc[kelp["timestamp"] == time, "mid_price"] = (trueask+truebid)/2
-
-# the entire trade history (not just own trades)
-infile = "data/ericliu.log"
-hist = get_tradehistory(infile)
-# resin_hist = get_mytrades(hist)
-# resin_hist = resin_hist.merge(kelp[["timestamp", "mid_price"]], on="timestamp", how="left")
-kelp_hist = get_mytrades(hist, "KELP")
-kelp_hist = kelp_hist.merge(kelp[["timestamp", "mid_price"]], on="timestamp", how="left")
-
-infile2 = "data/current.log"
-hist2 = get_tradehistory(infile2)
-kelp_hist2 = get_mytrades(hist2, "KELP")
-kelp_hist2 = kelp_hist2.merge(kelp[["timestamp", "mid_price"]], on="timestamp", how="left")
+prices = pd.read_csv("data/round-1/log1-prices.txt", delimiter=';')
+kelp = prices.loc[prices["product"]=="KELP"]
+kelp["mid_price"] = get_midprice_mm(kelp)
+# squid = prices.loc[prices["product"]=="SQUID_INK"]
+# squid["mid_price"] = get_midprice_mm(squid)
 
 
-# calculate open positions
-kelp_hist_copy = kelp_hist.copy()
-arr = kelp_hist_copy.loc[kelp_hist_copy["seller"]=="SUBMISSION"]["quantity"].array * -1
-kelp_hist_copy.loc[kelp_hist_copy["seller"]=="SUBMISSION", "quantity"] = arr
-kelp_hist["position"] = kelp_hist_copy["quantity"].cumsum()
+def get_trades(infile, prod, mp=None):
+    hist = get_tradehistory(infile)
+    myhist = get_mytrades(hist, prod)
+    if mp is not None:
+        myhist = myhist.merge(mp[["timestamp", "mid_price"]], on="timestamp", how="left")
 
-st.title("Kelp Data")
-st.dataframe(kelp[["timestamp", "mid_price", "profit_and_loss"]])
+    return myhist
 
-st.title("Kelp Trade History (ERIC)")
-st.dataframe(kelp_hist)
-st.title("Kelp Trade History (OWN)")
-st.dataframe(kelp_hist2)
 
+st.title("RESIN Trade History (OWN)")
+st.dataframe(get_trades("data/round-1/log1.log", "RAINFOREST_RESIN"))
+st.title("KELP Trade History (OWN)")
+st.dataframe(get_trades("data/round-1/log1.log", "KELP", kelp))
 
