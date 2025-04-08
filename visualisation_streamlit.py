@@ -19,8 +19,14 @@ def get_trades(infile, prod, mp=None):
     return myhist
 
 
-st.title("RESIN Trade History (OWN)")
-st.dataframe(get_trades("data/round-1/log1.log", "RAINFOREST_RESIN"))
+# st.title("RESIN Trade History (OWN)")
+# st.dataframe(get_trades("data/round-1/log1.log", "RAINFOREST_RESIN"))
+# st.title("RESIN Trade History (ERIC)")
+# st.dataframe(get_trades("data/round-1/ericliu.log", "RAINFOREST_RESIN"))
+
 st.title("KELP Trade History (OWN)")
-st.dataframe(get_trades("data/round-1/log1.log", "KELP", kelp))
+st.dataframe(get_trades("data/round-1/kelp1.log", "KELP", kelp))
+st.title("KELP Trade History (ERIC)")
+st.dataframe(get_trades("data/round-1/ericliu.log", "KELP", kelp))
+
 
