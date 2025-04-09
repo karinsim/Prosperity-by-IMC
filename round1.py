@@ -327,8 +327,8 @@ class Trader:
         order_depth = state.order_depths[prod]
 
         # mean reversion parameters #
-        pos_lim = 50
-        clear_lim = 30
+        pos_lim = 35
+        clear_lim = 20
         maxqty = 8
         maxmake = 20
         window = 20
