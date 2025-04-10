@@ -89,16 +89,11 @@ class Trader:
 
                 # sanity check: position
                 if prod not in state.position:
-                    if sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) != 0:
-                        print("Open positions incorrectly tracked!")
+                    assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == 0, \
+                        "Open positions incorrectly tracked!"
                 else:
-                    if sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) != state.position[prod]:
-                        print("Open positions incorrectly tracked!")
-                #     assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == 0, \
-                #         "Open positions incorrectly tracked!"
-                # else:
-                #     assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == state.position[prod],\
-                #         "Open positions incorrectly tracked!"
+                    assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == state.position[prod],\
+                        "Open positions incorrectly tracked!"
 
 
     def order_resin(self, state: TradingState):
@@ -424,12 +419,16 @@ class Trader:
                         mybuyvol = min(-ask_amount, pos_lim-current_long)
                         mybuyvol = min(mybuyvol, maxqty)
                         assert(mybuyvol >= 0), "Buy volume negative"
+                        if ask < minbought:
+                            minbought= ask
                         orders.append(Order(prod, ask, mybuyvol))
                         current_long += mybuyvol
                     elif ask > fairprice and ask < minbought:
                         mybuyvol = min(-ask_amount, pos_lim-current_long)
                         mybuyvol = min(mybuyvol, maxqty)
                         assert(mybuyvol >= 0), "Buy volume negative"
+                        if ask < minbought:
+                            minbought= ask
                         orders.append(Order(prod, ask, mybuyvol))
                         current_long += mybuyvol
 
@@ -444,6 +443,9 @@ class Trader:
                         mysellvol = min(mysellvol, maxqty)
                         mysellvol *= -1
                         assert(mysellvol <= 0), "Sell volume positive"
+                        # update maxsold to avoid selling lower in the same timestep
+                        if bid > maxsold:
+                            maxsold = bid
                         orders.append(Order(prod, bid, mysellvol))
                         current_short += mysellvol
                     elif bid < fairprice and bid > maxsold:
@@ -451,6 +453,9 @@ class Trader:
                         mysellvol = min(mysellvol, maxqty)
                         mysellvol *= -1
                         assert(mysellvol <= 0), "Sell volume positive"
+                        # update maxsold to avoid selling lower in the same timestep
+                        if bid > maxsold:
+                            maxsold = bid
                         orders.append(Order(prod, bid, mysellvol))
                         current_long += mybuyvol
 
