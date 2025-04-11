@@ -11,7 +11,8 @@ class Trader:
 
         print("Trader initialised!")
 
-        self.POS_LIM = {"RAINFOREST_RESIN": 50, "KELP": 50, "SQUID_INK": 50}
+        # set lower limit for squid to reduce exposure
+        self.POS_LIM = {"RAINFOREST_RESIN": 50, "KELP": 50, "SQUID_INK": 35}
         self.prods = ["RAINFOREST_RESIN", "KELP", "SQUID_INK"]
 
         # if tracking open position / relying on memory
@@ -89,16 +90,11 @@ class Trader:
 
                 # sanity check: position
                 if prod not in state.position:
-                    if sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) != 0:
-                        print("Open positions incorrectly tracked!")
+                    assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == 0, \
+                        "Open positions incorrectly tracked!"
                 else:
-                    if sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) != state.position[prod]:
-                        print("Open positions incorrectly tracked!")
-                #     assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == 0, \
-                #         "Open positions incorrectly tracked!"
-                # else:
-                #     assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == state.position[prod],\
-                #         "Open positions incorrectly tracked!"
+                    assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == state.position[prod],\
+                        "Open positions incorrectly tracked!"
 
 
     def order_resin(self, state: TradingState):
@@ -266,8 +262,8 @@ class Trader:
             if len(self.open_buys[prod]) > 0:
                 bought_prices = sorted(list(self.open_buys[prod].keys()), reverse=True)
                 i = 0
-                while mysellvol > 0 and i < len(bought_prices):
-                    qty = min(mysellvol, self.open_buys[prod][bought_prices[i]])
+                while mysellvol > 0 and i < len(bought_prices) and current_short > -pos_lim:
+                    qty = min(mysellvol, self.open_buys[prod][bought_prices[i]], current_short+pos_lim)
                     orders.append(Order(prod, int(bought_prices[i]+1), -qty))
                     i += 1
                     mysellvol -= qty
@@ -284,11 +280,11 @@ class Trader:
             if len(self.open_sells[prod]) > 0:
                 sold_prices = sorted(list(self.open_sells[prod].keys()))
                 i = 0
-                while mybuyvol > 0 and i < len(sold_prices):
-                    qty = min(mybuyvol, self.open_sells[prod][sold_prices[i]])
+                while mybuyvol > 0 and i < len(sold_prices) and current_long < pos_lim:
+                    qty = min(mybuyvol, self.open_sells[prod][sold_prices[i]], pos_lim-current_long)
                     orders.append(Order(prod, int(sold_prices[i]-1), qty))
                     i += 1
-                    mybuyvol += qty
+                    mybuyvol -= qty
                     current_long += qty
             else:
                 if len(asks) > 0:
@@ -325,11 +321,12 @@ class Trader:
         prod = "SQUID_INK"
         orders: list[Order] = []
         order_depth = state.order_depths[prod]
+        pos_lim = self.POS_LIM[prod]
 
         # mean reversion parameters #
-        pos_lim = 35
-        clear_lim = 20
+        clear_lim = 0
         maxqty = 8
+        swing = 3
         maxmake = 20
         window = 20
         mult = 1.25
@@ -368,7 +365,7 @@ class Trader:
 
         # Mean reversion strategy
         sma = np.mean(np.array(self.squid_hist))
-        std = np.std(np.array(self.squid_hist))
+        std = np.std(np.array(self.squid_hist), ddof=1)
         z = (self.squid_hist[-1] - sma) / std
 
         if z < -mult:
@@ -387,14 +384,21 @@ class Trader:
     
         if self.upper >= hits:
             action = "SELL"
-            self.signal -= 1
+            if self.signal > 0:
+                self.signal = -1
+            else:
+                self.signal -= 1
             if self.upper >= strong_hits:
                 strong_signal = "SELL"
         elif self.lower >= hits:
             action = "BUY"
-            self.signal += 1
+            if self.signal < 0:
+                self.signal = 1
+            else:
+                self.signal += 1
             if self.lower >= strong_hits:
                 strong_signal = "BUY"
+
             
         sellorders = sorted(list(order_depth.sell_orders.items()))
         buyorders = sorted(list(order_depth.buy_orders.items()), reverse=True)
@@ -416,34 +420,60 @@ class Trader:
             maxsold = 1e4
 
         # market taking
-        if action == "BUY":
-            if (self.signal == 1 or self.signal >= consecutive_hits or strong_signal == "BUY") and (current_long < pos_lim):
-                for sellorder in sellorders:
-                    ask, ask_amount = sellorder
+        for sellorder in sellorders:
+            ask, ask_amount = sellorder
+            # large price change
+            if ask < minbought - swing or (ask < minsold - swing and ask < minbought):
+                mybuyvol = min(maxqty, pos_lim-current_long)
+                minbought = ask
+                if mybuyvol > 0:
+                    orders.append(Order(prod, ask, mybuyvol))
+                    current_long += mybuyvol
+            
+            else:
+                if action == "BUY" and (self.signal == 1 or self.signal >= consecutive_hits 
+                                        or strong_signal == "BUY") and (current_long < pos_lim):
                     if ask <= fairprice and ask < maxbought:
                         mybuyvol = min(-ask_amount, pos_lim-current_long)
                         mybuyvol = min(mybuyvol, maxqty)
                         assert(mybuyvol >= 0), "Buy volume negative"
+                        # update minbought to avoid buying higher in the same timestep
+                        if ask < minbought:
+                            minbought = ask
                         orders.append(Order(prod, ask, mybuyvol))
                         current_long += mybuyvol
+
                     elif ask > fairprice and ask < minbought:
                         mybuyvol = min(-ask_amount, pos_lim-current_long)
                         mybuyvol = min(mybuyvol, maxqty)
                         assert(mybuyvol >= 0), "Buy volume negative"
+                        # update minbought to avoid buying higher in the same timestep
+                        minbought= ask
                         orders.append(Order(prod, ask, mybuyvol))
                         current_long += mybuyvol
 
-        if action == "SELL":
-            if (self.signal == -1 or self.signal <= -consecutive_hits or strong_signal == "SELL") and (current_short > -pos_lim):
-                for buyorder in buyorders:
-                    bid, bid_amount = buyorder
-                    if bid < fairprice:
-                        break
+        for buyorder in buyorders:
+            bid, bid_amount = buyorder
+            # large price change
+            if bid > maxsold + swing or (bid > maxbought + swing and bid > maxsold):
+                mysellvol = min(maxqty, current_short+pos_lim)
+                mysellvol *= -1
+                maxsold = bid
+                if mysellvol < 0:
+                    orders.append(Order(prod, bid, mysellvol))
+                    current_short += mysellvol
+            
+            else:
+                if action == "SELL" and (self.signal == -1 or self.signal <= -consecutive_hits 
+                                         or strong_signal == "SELL") and (current_short > -pos_lim):
                     if bid >= fairprice and bid > minsold:
                         mysellvol = min(bid_amount, pos_lim+current_short)
                         mysellvol = min(mysellvol, maxqty)
                         mysellvol *= -1
                         assert(mysellvol <= 0), "Sell volume positive"
+                        # update maxsold to avoid selling lower in the same timestep
+                        if bid > maxsold:
+                            maxsold = bid
                         orders.append(Order(prod, bid, mysellvol))
                         current_short += mysellvol
                     elif bid < fairprice and bid > maxsold:
@@ -451,54 +481,64 @@ class Trader:
                         mysellvol = min(mysellvol, maxqty)
                         mysellvol *= -1
                         assert(mysellvol <= 0), "Sell volume positive"
+                        # update maxsold to avoid selling lower in the same timestep
+                        maxsold = bid
                         orders.append(Order(prod, bid, mysellvol))
-                        current_long += mybuyvol
+                        current_short += mysellvol
 
         # clear open positions if approaching position limit
         if current_long > clear_lim or action == "EXIT":
             for price in bought_prices:
-                if fairprice > price:
-                    orders.append(Order(prod, round_ask+1, -self.open_buys[prod][price]))
-                elif bids[0] > price:
-                    orders.append(Order(prod, bids[0], -self.open_buys[prod][price]))
-                elif asks[0] > price:
-                    orders.append(Order(prod, asks[0]-1, -self.open_buys[prod][price]))
-                else:
-                    orders.append(Order(prod, int(price), -self.open_buys[prod][price]))
+                qty = min(self.open_buys[prod][price], pos_lim+current_short)
+                if qty > 0:
+                    if fairprice > price:
+                        orders.append(Order(prod, round_ask+1, -qty))
+                    elif bids[0] > price:
+                        orders.append(Order(prod, bids[0], -qty))
+                    elif asks[0] > price:
+                        orders.append(Order(prod, asks[0]-1, -qty))
+                    else:
+                        orders.append(Order(prod, int(price), -qty))
+                    current_short -= qty
         
         if current_short < -clear_lim or action == "EXIT":
             for price in sold_prices:
-                if fairprice < price:
-                    orders.append(Order(prod, round_bid-1, self.open_sells[prod][price]))
-                elif asks[0] < price:
-                    orders.append(Order(prod, asks[0], self.open_sells[prod][price]))
-                elif bids[0] < price:
-                    orders.append(Order(prod, bids[0]+1, self.open_sells[prod][price]))
-                else:
-                    orders.append(Order(prod, int(price), self.open_sells[prod][price]))
+                qty = min(self.open_sells[prod][price], pos_lim-current_long)
+                if qty > 0:
+                    if fairprice < price:
+                        orders.append(Order(prod, round_bid-1, qty))
+                    elif asks[0] < price:
+                        orders.append(Order(prod, asks[0], qty))
+                    elif bids[0] < price:
+                        orders.append(Order(prod, bids[0]+1, qty))
+                    else:
+                        orders.append(Order(prod, int(price), qty))
+                    current_long += qty
             
         # market making: strong signal
+        bestbid = buyorders[0][0]
+        bestask = sellorders[0][0]
         if strong_signal == "BUY" and current_long < pos_lim:
-            bestbid = buyorders[0][0]
             mmbid = max(order_depth.buy_orders, key=order_depth.buy_orders.get)
             qty = pos_lim - current_long
             if bestbid < fairprice:
-                price = min(bestbid+1, round_bid-1, int(maxbought))
+                price = min(bestbid+1, round_bid, int(maxbought))
             else:
-                price = min(mmbid+1, round_bid, int(maxbought))
+                price = min(mmbid, round_bid, int(maxbought))
             qty = min(qty, maxmake)
-            orders.append(Order(prod, price, qty))
+            if qty > 0:
+                orders.append(Order(prod, price, qty))
+
         if strong_signal == "SELL" and current_short > -pos_lim:
-            bestask = sellorders[0][0]
             mmask = max(order_depth.sell_orders, key=order_depth.sell_orders.get)
             qty = current_short + pos_lim
             if bestask > fairprice:
-                price = max(bestask-1, round_ask+1, int(minsold))
+                price = max(bestask-1, round_ask, int(minsold))
             else:
                 price = max(mmask-1, round_ask, int(minsold))
             qty = min(qty, maxmake)
-            orders.append(Order(prod, price, -qty))
-            print("Make order: ", orders[-1])
+            if qty > 0:
+                orders.append(Order(prod, price, -qty))
 
         return orders
     
@@ -522,9 +562,9 @@ class Trader:
         result = {}
         # # debug mode
         # if state.timestamp < 100:
-        result["RAINFOREST_RESIN"] = self.order_resin(state)
+        # result["RAINFOREST_RESIN"] = self.order_resin(state)
         result["KELP"] = self.order_kelp(state)
-        result["SQUID_INK"] = self.order_squid(state)
+        # result["SQUID_INK"] = self.order_squid(state)
 
         traderObject = {"open buys": self.open_buys, 
                         "open sells": self.open_sells, 
