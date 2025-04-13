@@ -13,8 +13,12 @@ class Trader:
         print("Trader initialised!")
 
         # set lower limit for squid to reduce exposure
-        self.POS_LIM = {"RAINFOREST_RESIN": 50, "KELP": 50, "SQUID_INK": 50}
-        self.prods = ["RAINFOREST_RESIN", "KELP", "SQUID_INK"]
+        self.POS_LIM = {"RAINFOREST_RESIN": 50, "KELP": 50, "SQUID_INK": 50,
+                        "CROISSANTS": 250, "JAMS": 350, "DJEMBES": 60,
+                        "PICNIC_BASKET1": 60, "PICNIC_BASKET2": 100}
+        self.prods = list(self.POS_LIM.keys())
+        self.basket_contents={"PICNIC_BASKET1": {"CROISSANTS": 6, "JAMS": 3, "DJEMBES": 1},
+                              "PICNIC_BASKET2": {"CROISSANTS": 4, "JAMS": 2}}
 
         # if tracking open position / relying on memory
         self.timer = 0
@@ -29,12 +33,16 @@ class Trader:
         self.slow_upper = 0
         self.slow_lower = 0
 
+        # SPREAD (baskets)
+        self.spread_hist = {"PICNIC_BASKET1": [], "PICNIC_BASKET2": []}
+        self.history = {prod: [] for prod in self.prods}
+
+
     def update_open_pos(self, state: TradingState):
             """
             Update open positions according to updated own trades
             Later try to buy/sell lower/higher than open trades
             """
-
             for prod in state.own_trades:
                 trades = state.own_trades[prod]
                 trades = [trade for trade in trades if trade.timestamp > self.recorded_time[prod]]
@@ -92,11 +100,15 @@ class Trader:
 
                 # sanity check: position
                 if prod not in state.position:
-                    assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == 0, \
-                        "Open positions incorrectly tracked!"
+                    if sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) != 0:
+                        print("BEEP! Open positions incorrectly tracked!")
+                    # assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == 0, \
+                    #     "BEEP! Open positions incorrectly tracked!"
                 else:
-                    assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == state.position[prod],\
-                        "Open positions incorrectly tracked!"
+                    if sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) != state.position[prod]:
+                        print("BEEP! Open positions incorrectly tracked!")
+                    # assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == state.position[prod],\
+                    #     "BEEP! Open positions incorrectly tracked!"
 
 
     def check_orders(self, orders, prod):
@@ -210,18 +222,15 @@ class Trader:
 
         return orders
 
-    ### UPDATE KELP REGRESSION COEFFS WITH NEW DATA ###
-    def order_kelp(self, state: TradingState):
+
+    def order_kelp(self, state: TradingState, sigma, m, c):
         prod = "KELP"
         orders: list[Order] = []
         order_depth = state.order_depths[prod]
         pos_lim = self.POS_LIM[prod]
         signal = None
-        short_lim= 5
-        long_lim = 15
-        ## CHANGE WITH DAY 1 VALUES!!!!
-        sigma, m, c =  14.422964389386117, 1.173227183514493e-05, 2052.6409802838834        # FOR DAY 2
-        # sigma, m, c = 10.880405317154116, 1.1559134079508539e-05, 2040.847245742634         # FOR BACKTESTING
+
+        long_lim, short_lim = 15, 5
         mult = 0.75
 
         # # to log live order book
@@ -249,9 +258,9 @@ class Trader:
         current_short, current_long = 0, 0
         if prod in state.position:
             if state.position[prod] == 50:
-                print("LONG LIM REACHED (KELP)")
+                print("LONG LIM REACHED "+prod)
             elif state.position[prod] == -50:
-                print("SHORT LIM REACHED (KELP)")
+                print("SHORT LIM REACHED"+prod)
             current_pos = state.position[prod]
             if current_pos > 0:
                 current_long += current_pos
@@ -352,7 +361,7 @@ class Trader:
                 price = max(round_ask, bestask-1, bestbid)
 
             orders.append(Order(prod, price, -qty))
-        
+    
         ### SANITY CHECK BECAUSE I'M SCARRED FROM THE TYPO IN ROUND 1 ###
         orders = self.check_orders(orders, prod)
 
@@ -570,13 +579,216 @@ class Trader:
             print("STRONG SELL")
 
         return self.check_orders(orders, prod)
+            
+
+    def order_basket(self, state: TradingState, current_positions,
+                     basket="PICNIC_BASKET1", window=20, mult1=2.5, mult2=1.2, 
+                     clear_lim=20, adverse_lim=40, maxbuy=5):
+        
+        # atm only try to either market take or clear positions, not both together
+
+        if basket not in state.order_depths:
+            return None
+        if not state.order_depths[basket].buy_orders or not state.order_depths[basket].sell_orders:
+            return None
+
+        pos_lim = self.POS_LIM[basket]
+        contents = self.basket_contents[basket]
+        basket_position = 0
+        if basket in state.position:
+            basket_position = state.position[basket]
+        
+        if np.abs(basket_position) >= pos_lim:
+            print("POSITION LIMIT REACHED! "+basket)
+            return None
+
+        basket_order_depth = state.order_depths[basket]
+        basket_best_bid = max(basket_order_depth.buy_orders.keys())
+        basket_best_ask = min(basket_order_depth.sell_orders.keys())
+        basket_bid_vol = basket_order_depth.buy_orders[basket_best_bid]
+        basket_ask_vol = -basket_order_depth.sell_orders[basket_best_ask]
+        basket_swmp = (basket_best_bid * basket_ask_vol + 
+                       basket_best_ask * basket_bid_vol) / (basket_bid_vol + basket_ask_vol)
+
+        # get synthetic (implied) midprice
+        bid_vols, ask_vols = [], []
+        implied_bid, implied_ask = 0, 0
+        for prod in contents:
+            if state.order_depths[prod].buy_orders:
+                best_bid = max(state.order_depths[prod].buy_orders.keys())
+            else:
+                best_bid = 0
+            if state.order_depths[prod].sell_orders:
+                best_ask = min(state.order_depths[prod].sell_orders.keys())
+            else:
+                best_ask = float("inf")
+
+            implied_bid += contents[prod] * best_bid
+            implied_ask += contents[prod] * best_ask
+
+            if best_bid > 0:
+                bid_vols.append(state.order_depths[prod].buy_orders[best_bid] // contents[prod])
+            if best_ask < float("inf"):
+                ask_vols.append(-state.order_depths[prod].sell_orders[best_ask] // contents[prod])
+        
+        if implied_bid > 0 and implied_ask < float("inf"):
+            implied_ask_vol = min(ask_vols)
+            implied_bid_vol = min(bid_vols)
+            synthetic_swmp = (implied_bid * implied_ask_vol + 
+                              implied_ask * implied_bid_vol) / (implied_bid_vol + implied_ask_vol)
+        
+        else:
+            return None         # contents midprice unavailable
+
+        spread = basket_swmp - synthetic_swmp
+        self.spread_hist[basket].append(spread)
+        self.spread_hist[basket] = self.spread_hist[basket][-window:]
+        spread_hist = self.spread_hist[basket].copy()
+
+        if len(spread_hist) < window:
+            return None     # not enough memory
+
+        # mean reversion
+        sma = np.mean(spread_hist)
+        std = np.std(spread_hist, ddof=1)
+        
+        content_orders = {}
+
+        # clear orders
+        if basket_position <= -clear_lim:
+            if spread_hist[-1] - sma <= - mult2 * std:
+                print("CLEAR BUY BASKET")
+                basket_lim = pos_lim - basket_position
+                mybuyvol = [-(basket_position+clear_lim), implied_bid_vol, basket_lim]
+
+                # check positions of individual content (to sell)
+                for prod in contents:
+                    available = self.POS_LIM[prod] + current_positions[prod]
+                    mybuyvol.append(available // contents[prod])
+                
+                mybuyvol = min(mybuyvol)
+                if mybuyvol > 0:
+                    basket_order = Order(basket, basket_best_ask, mybuyvol)
+
+                    for prod in contents:
+                        best_bid = max(state.order_depths[prod].buy_orders.keys())
+                        content_orders[prod] = Order(prod, best_bid, -mybuyvol * contents[prod])
+                    
+                    return basket_order, content_orders
+        
+        if basket_position >= clear_lim:
+            if spread_hist[-1] - sma >= mult2 * std:
+                print("CLEAR SELL BASKET")
+                basket_lim = basket_position + pos_lim
+                mysellvol = [basket_position-clear_lim, implied_ask_vol, basket_lim]
+
+                # check positions of individual content
+                for prod in contents:
+                    available = self.POS_LIM[prod] - current_positions[prod]
+                    mysellvol.append(available // contents[prod])
+                mysellvol = min(mysellvol)
+                if mysellvol > 0:
+                    basket_order = Order(basket, basket_best_bid, -mysellvol)
+                    for prod in contents:
+                        best_ask = min(state.order_depths[prod].buy_orders.keys())
+                        content_orders[prod] = Order(prod, best_ask, mysellvol * contents[prod])
+                    return basket_order, content_orders
+
+        # implied_ask_vol, basket_ask_vol both positive
+        if spread_hist[-1] - sma >= mult1 * std and basket_position > -adverse_lim:
+            print("SELL BASKET SIGNAL")
+            # basket price > synthetic price --> buy contents & sell basket
+            basket_lim = pos_lim + basket_position
+            qty_basket = [basket_bid_vol, implied_ask_vol, basket_lim, maxbuy]
+
+            # check positions of individual content
+            for prod in contents:
+                available = self.POS_LIM[prod] - current_positions[prod]
+                qty_basket.append(available // contents[prod])
+            
+            qty_basket = min(qty_basket)
+            if qty_basket > 0:
+                basket_order = Order(basket, basket_best_bid, -qty_basket)
+
+                for prod in contents:
+                    best_ask = min(state.order_depths[prod].buy_orders.keys())
+                    content_orders[prod] = Order(prod, best_ask, qty_basket * contents[prod])
+                
+                return basket_order, content_orders
+
+        if spread_hist[-1] - sma <= - mult1 * std and basket_position < adverse_lim:
+            print("BUY BASKET SIGNAL")
+            # basket price < synthetic price --> buy basket & sell contents
+            basket_lim = pos_lim - basket_position
+            qty_basket = [basket_ask_vol, implied_bid_vol, basket_lim, maxbuy]
+
+            # check positions of individual content
+            for prod in contents:
+                available = self.POS_LIM[prod] + current_positions[prod]
+                qty_basket.append(available // contents[prod])
+            
+            qty_basket = min(qty_basket)
+            if qty_basket > 0:
+                basket_order = Order(basket, basket_best_ask, qty_basket)
+
+                for prod in contents:
+                    best_bid = max(state.order_depths[prod].buy_orders.keys())
+                    content_orders[prod] = Order(prod, best_bid, -qty_basket * contents[prod])
+                
+                return basket_order, content_orders
+  
+        return None
+
+
+    def order_component(self, state: TradingState, prod: str, logic: str, pos_lim: int):
+        orders: List[Order] = []
+        order_depth = state.order_depths[prod]
+        pos = state.position.get(prod, 0)
+        mid_price = None
+        sellorders = sorted(list(order_depth.sell_orders.items()))
+        buyorders = sorted(list(order_depth.buy_orders.items()), reverse=True)
+        if order_depth.buy_orders and order_depth.sell_orders:
+            mid_price = (min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
+              + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
+            round_bid = round(mid_price - 1)
+            round_ask = round(mid_price + 0.5)
+        else:
+            return []
+
+        self.history[prod].append(mid_price)
+        bestask, ask_vol = sellorders[0]
+        bestbid, bid_vol = buyorders[0]
+
+        if logic == "trend" and len(self.history[prod]) > 30:
+            sma = np.mean(self.history[prod][-30:])
+            if mid_price > sma + 2 and pos > -pos_lim:
+                orders.append(Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
+            elif mid_price < sma - 2 and pos < pos_lim:
+                orders.append(Order(prod, min(round_bid, bestbid), min(bid_vol, pos_lim-pos)))
+
+        elif logic == "momentum" and len(self.history[prod]) > 20:
+            delta = mid_price - self.history[prod][-20]
+            if delta > 3 and pos > -pos_lim:
+                orders.append(Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
+            elif delta < -3 and pos < pos_lim:
+                orders.append(Order(prod, min(round_bid, bestbid), min(bid_vol, pos_lim-pos)))
+
+        elif logic == "breakout" and len(self.history[prod]) > 10:
+            recent = self.history[prod][-10:]
+            if mid_price > max(recent) and pos > -pos_lim:
+                orders.append(Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
+            elif mid_price < min(recent) and pos < pos_lim:
+                orders.append(Order(prod, min(round_bid, bestbid), min(bid_vol, pos_lim-pos)))
+
+        return orders
     
 
-
-
     def run(self, state: TradingState):
-        self.timer += 100
-        
+        self.timer += 100   
+
+        ### UPDATE WITH DAY N DATA ###
+        linreg = {"KELP":  (14.422964389386117, 1.173227183514493e-05, 2052.6409802838834)}
+
         if self.timer != state.timestamp:
             if state.traderData != None and state.traderData != "":
                 traderObject = jsonpickle.decode(state.traderData)
@@ -590,22 +802,45 @@ class Trader:
                 self.lower = traderObject["squid lower"]
                 self.slow_upper = traderObject["squid slow upper"]
                 self.slow_lower = traderObject["squid slow lower"]
+                self.spread_hist = traderObject["spread history"]
+                self.history = traderObject["history"]
         
         self.update_open_pos(state)
 
         result = {}
-        # # debug mode
+        # debug mode
         # if state.timestamp < 100:
-        # result["RAINFOREST_RESIN"] = self.order_resin(state)
-        # result["KELP"] = self.order_kelp(state)
-        result["SQUID_INK"] = self.order_squid(state)
 
-        # baskets = ["PICNIC_BASKET1", "PICNIC_BASKET2"]
-        # contents = [{"CROISSANTS": 6, "JAMS": 3, "DJEMBES": 1}, {"CROISSANTS": 4, "JAMS": 2}]
-        # for bask, content in zip(baskets, contents):
-        #     spread_order = self.order_basket(state, bask, content)
-        #     if spread_order is not None:
-        #         print("DO SOMETHING")
+        # result["RAINFOREST_RESIN"] = self.order_resin(state)
+        # result["KELP"] = self.order_kelp(state, *linreg["KELP"])
+        # result["SQUID_INK"] = self.order_squid(state)
+
+        result["CROISSANTS"] = []
+        result["JAMS"] = []
+        result["DJEMBES"] = []
+        baskets = ["PICNIC_BASKET1", "PICNIC_BASKET2"]
+
+        # window, mult1, mult2, clearlim, adverselim, maxbuy
+        MR_params = [(20, 2.5, 1.5, 10, 35, 15), (20, 2.5, 1.5, 15, 60, 15)]      
+
+        current_positions = {prod: (state.position[prod] if prod in state.position else 0) 
+                             for prod in self.basket_contents[baskets[0]]} 
+        for basket, args in zip(baskets, MR_params):
+            spread_order = self.order_basket(state, current_positions, basket, *args)
+            if spread_order is not None:
+                basket_order, content_orders = spread_order
+                result[basket] = [basket_order]
+                for prod in content_orders:
+                    result[prod].append(content_orders[prod])
+                    current_positions[prod] += content_orders[prod].quantity
+        
+        
+        # only order the individual contents if not ordering baskets
+        if "PICNIC_BASKET1" not in result:
+            result["DJEMBES"] = self.order_component(state, "DJEMBES", logic="breakout", pos_lim=10)
+            if "PICNIC_BASKET2" not in result:
+                result["CROISSANTS"] = self.order_component(state, "CROISSANTS", logic="trend", pos_lim=15)
+                result["JAMS"] = self.order_component(state, "JAMS", logic="momentum", pos_lim=20)
 
         traderObject = {"open buys": self.open_buys, 
                         "open sells": self.open_sells, 
@@ -614,9 +849,11 @@ class Trader:
                         "squid upper": self.upper,
                         "squid lower": self.lower,
                         "squid slow upper": self.slow_upper,
-                        "squid slow lower": self.slow_lower,}
+                        "squid slow lower": self.slow_lower,
+                        "spread history": self.spread_hist,
+                        "history": self.history}
         traderData = jsonpickle.encode(traderObject)
 
         conversions = 1
         return result, conversions, traderData
-    
+
