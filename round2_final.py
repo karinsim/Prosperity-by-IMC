@@ -36,6 +36,7 @@ class Trader:
         # SPREAD (baskets)
         self.spread_hist = {"PICNIC_BASKET1": [], "PICNIC_BASKET2": []}
         self.history = {prod: [] for prod in self.prods}
+        self.spread_signal = 0
 
 
     def update_open_pos(self, state: TradingState):
@@ -171,9 +172,9 @@ class Trader:
             if current_long < pos_lim:
                 if ask < fairprice:
                     mybuyvol = min(-ask_amount, pos_lim-current_long)
-                    assert(mybuyvol >= 0), "Buy volume negative"
-                    orders.append(Order(prod, ask, mybuyvol))
-                    current_long += mybuyvol
+                    if mybuyvol > 0:
+                        orders.append(Order(prod, ask, mybuyvol))
+                        current_long += mybuyvol
 
         for buyorder in buyorders:
             bid, bid_amount = buyorder
@@ -184,21 +185,21 @@ class Trader:
                 if bid > fairprice:
                     mysellvol = min(bid_amount, pos_lim+current_short)
                     mysellvol *= -1
-                    assert(mysellvol <= 0), "Sell volume positive"
-                    orders.append(Order(prod, bid, mysellvol))
-                    current_short += mysellvol
+                    if mysellvol < 0:
+                        orders.append(Order(prod, bid, mysellvol))
+                        current_short += mysellvol
 
         # clear open positions if approaching position limit (buy/sell at fairprice to increase chance of order acceptance)
         if current_long > clear_lim:
             mysellvol = -min(current_short+pos_lim, current_long-clear_lim)
-            assert mysellvol <= 0, "Sell volume positive!"
-            orders.append(Order(prod, fairprice, mysellvol))
-            current_short += mysellvol
+            if mysellvol < 0:
+                orders.append(Order(prod, fairprice, mysellvol))
+                current_short += mysellvol
         if current_short < -clear_lim:
             mybuyvol = max(pos_lim-current_long, -(clear_lim+current_short))
-            assert mybuyvol >= 0, "Buy volume negative!"
-            orders.append(Order(prod, fairprice, mybuyvol))
-            current_long += mybuyvol
+            if mybuyvol > 0:
+                orders.append(Order(prod, fairprice, mybuyvol))
+                current_long += mybuyvol
 
         # market making: fill the remaining orders up to position limit
         bestask, bestbid = sellorders[0][0], buyorders[0][0]
@@ -283,9 +284,9 @@ class Trader:
             if current_long < pos_lim:
                 if ask < fairprice:
                     mybuyvol = min(-ask_amount, pos_lim-current_long)
-                    assert(mybuyvol >= 0), "Buy volume negative"
-                    orders.append(Order(prod, ask, mybuyvol))
-                    current_long += mybuyvol
+                    if mybuyvol > 0:
+                        orders.append(Order(prod, ask, mybuyvol))
+                        current_long += mybuyvol
 
         for buyorder in buyorders:
             bid, bid_amount = buyorder
@@ -504,13 +505,13 @@ class Trader:
                 if (ask <= fairprice and ask < maxbought) or (ask > fairprice and ask < minbought):
                     mybuyvol = min(-ask_amount, soft_lim-current_long)
                     mybuyvol = min(mybuyvol, maxqty)
-                    assert(mybuyvol >= 0), "Buy volume negative"
-                    # update minbought to avoid buying higher in the same timestep
-                    if minbought == -1 or ask < minbought:
-                        minbought = ask
-                    orders.append(Order(prod, ask, mybuyvol))
-                    current_long += mybuyvol
-                    print("BUY SIGNAL")
+                    if mybuyvol > 0:
+                        # update minbought to avoid buying higher in the same timestep
+                        if minbought == -1 or ask < minbought:
+                            minbought = ask
+                        orders.append(Order(prod, ask, mybuyvol))
+                        current_long += mybuyvol
+                        print("BUY SIGNAL")
 
         for buyorder in buyorders:
             bid, bid_amount = buyorder
@@ -530,13 +531,13 @@ class Trader:
                     mysellvol = min(bid_amount, soft_lim+current_short)
                     mysellvol = min(mysellvol, maxqty)
                     mysellvol *= -1
-                    assert(mysellvol <= 0), "Sell volume positive"
-                    # update maxsold to avoid selling lower in the same timestep
-                    if bid > maxsold:
-                        maxsold = bid
-                    orders.append(Order(prod, bid, mysellvol))
-                    current_short += mysellvol
-                    print("SELL SIGNAL")
+                    if mysellvol < 0:
+                        # update maxsold to avoid selling lower in the same timestep
+                        if bid > maxsold:
+                            maxsold = bid
+                        orders.append(Order(prod, bid, mysellvol))
+                        current_short += mysellvol
+                        print("SELL SIGNAL")
 
         # clear open positions if approaching position limit
         if current_long > clear_lim:
@@ -581,9 +582,7 @@ class Trader:
         return self.check_orders(orders, prod)
             
 
-    def order_basket(self, state: TradingState, current_positions,
-                     basket="PICNIC_BASKET1", window=20, mult1=2.5, mult2=1.2, 
-                     clear_lim=20, adverse_lim=40, maxbuy=5):
+    def order_basket(self, state: TradingState, current_positions, basket, window, mult1, adverse_lim, maxbuy, hits):
         
         # atm only try to either market take or clear positions, not both together
 
@@ -653,89 +652,110 @@ class Trader:
         std = np.std(spread_hist, ddof=1)
         
         content_orders = {}
+        mult2 = 2.
 
-        # clear orders
-        if basket_position <= -clear_lim:
-            if spread_hist[-1] - sma <= - mult2 * std:
-                print("CLEAR BUY BASKET")
-                basket_lim = pos_lim - basket_position
-                mybuyvol = [-(basket_position+clear_lim), implied_bid_vol, basket_lim]
+        # # clear orders
+        # clear_lim = int(0.75 * adverse_lim)
+        # if basket_position <= -clear_lim:
+        #     if spread_hist[-1] - sma <= - mult2 * std:
+        #         print("CLEAR BUY BASKET ", basket)
+        #         basket_lim = adverse_lim - basket_position
+        #         mybuyvol = [-(basket_position+adverse_lim), implied_bid_vol, basket_lim]
 
-                # check positions of individual content (to sell)
-                for prod in contents:
-                    available = self.POS_LIM[prod] + current_positions[prod]
-                    mybuyvol.append(available // contents[prod])
+        #         # check positions of individual content (to sell)
+        #         for prod in contents:
+        #             available = self.POS_LIM[prod] + current_positions[prod]
+        #             mybuyvol.append(available // contents[prod])
                 
-                mybuyvol = min(mybuyvol)
-                if mybuyvol > 0:
-                    basket_order = Order(basket, basket_best_ask, mybuyvol)
+        #         mybuyvol = min(mybuyvol)
+        #         if mybuyvol > 0:
+        #             basket_order = Order(basket, basket_best_ask, mybuyvol)
 
-                    for prod in contents:
-                        best_bid = max(state.order_depths[prod].buy_orders.keys())
-                        content_orders[prod] = Order(prod, best_bid, -mybuyvol * contents[prod])
+        #             for prod in contents:
+        #                 best_bid = max(state.order_depths[prod].buy_orders.keys())
+        #                 content_orders[prod] = Order(prod, best_bid, -mybuyvol * contents[prod])
                     
-                    return basket_order, content_orders
+        #             return basket_order, content_orders
         
-        if basket_position >= clear_lim:
-            if spread_hist[-1] - sma >= mult2 * std:
-                print("CLEAR SELL BASKET")
-                basket_lim = basket_position + pos_lim
-                mysellvol = [basket_position-clear_lim, implied_ask_vol, basket_lim]
+        # if basket_position >= clear_lim:
+        #     if spread_hist[-1] - sma >= mult2 * std:
+        #         print("CLEAR SELL BASKET ", basket)
+        #         basket_lim = basket_position + adverse_lim
+        #         mysellvol = [basket_position-adverse_lim, implied_ask_vol, basket_lim]
+
+        #         # check positions of individual content
+        #         for prod in contents:
+        #             available = self.POS_LIM[prod] - current_positions[prod]
+        #             mysellvol.append(available // contents[prod])
+        #         mysellvol = min(mysellvol)
+        #         if mysellvol > 0:
+        #             basket_order = Order(basket, basket_best_bid, -mysellvol)
+        #             for prod in contents:
+        #                 best_ask = min(state.order_depths[prod].buy_orders.keys())
+        #                 content_orders[prod] = Order(prod, best_ask, mysellvol * contents[prod])
+        #             return basket_order, content_orders
+
+        # implied_ask_vol, basket_ask_vol both positive
+        if spread_hist[-1] - sma >= mult1 * std and basket_position > -adverse_lim:
+            
+            if self.spread_signal > 0:
+                self.spread_signal = -1
+            else:
+                self.spread_signal -= 1
+            
+            if self.spread_signal == -1 or self.spread_signal == -2 or self.spread_signal <= -hits:
+                print("SELL BASKET SIGNAL ", basket)
+                self.spread_signal = 0
+                # basket price > synthetic price --> buy contents & sell basket
+                basket_lim = pos_lim + basket_position
+                qty_basket = [basket_bid_vol, implied_ask_vol, basket_lim, maxbuy]
 
                 # check positions of individual content
                 for prod in contents:
                     available = self.POS_LIM[prod] - current_positions[prod]
-                    mysellvol.append(available // contents[prod])
-                mysellvol = min(mysellvol)
-                if mysellvol > 0:
-                    basket_order = Order(basket, basket_best_bid, -mysellvol)
+                    if available <= 1:
+                        print("blocked by ", prod)
+                    qty_basket.append(available // contents[prod])
+                
+                qty_basket = min(qty_basket)
+                if qty_basket > 0:
+                    basket_order = Order(basket, basket_best_bid, -qty_basket)
+
                     for prod in contents:
                         best_ask = min(state.order_depths[prod].buy_orders.keys())
-                        content_orders[prod] = Order(prod, best_ask, mysellvol * contents[prod])
+                        content_orders[prod] = Order(prod, best_ask, qty_basket * contents[prod])
+                    
                     return basket_order, content_orders
 
-        # implied_ask_vol, basket_ask_vol both positive
-        if spread_hist[-1] - sma >= mult1 * std and basket_position > -adverse_lim:
-            print("SELL BASKET SIGNAL")
-            # basket price > synthetic price --> buy contents & sell basket
-            basket_lim = pos_lim + basket_position
-            qty_basket = [basket_bid_vol, implied_ask_vol, basket_lim, maxbuy]
-
-            # check positions of individual content
-            for prod in contents:
-                available = self.POS_LIM[prod] - current_positions[prod]
-                qty_basket.append(available // contents[prod])
-            
-            qty_basket = min(qty_basket)
-            if qty_basket > 0:
-                basket_order = Order(basket, basket_best_bid, -qty_basket)
-
-                for prod in contents:
-                    best_ask = min(state.order_depths[prod].buy_orders.keys())
-                    content_orders[prod] = Order(prod, best_ask, qty_basket * contents[prod])
-                
-                return basket_order, content_orders
-
         if spread_hist[-1] - sma <= - mult1 * std and basket_position < adverse_lim:
-            print("BUY BASKET SIGNAL")
-            # basket price < synthetic price --> buy basket & sell contents
-            basket_lim = pos_lim - basket_position
-            qty_basket = [basket_ask_vol, implied_bid_vol, basket_lim, maxbuy]
-
-            # check positions of individual content
-            for prod in contents:
-                available = self.POS_LIM[prod] + current_positions[prod]
-                qty_basket.append(available // contents[prod])
+            if self.spread_signal > 0:
+                self.spread_signal += 1
+            else:
+                self.spread_signal = 1
             
-            qty_basket = min(qty_basket)
-            if qty_basket > 0:
-                basket_order = Order(basket, basket_best_ask, qty_basket)
+            if self.spread_signal == 1 or self.spread_signal == 2 or self.spread_signal >= hits:
+                print("BUY BASKET SIGNAL ", basket)
+                self.spread_signal = 0
+                # basket price < synthetic price --> buy basket & sell contents
+                basket_lim = pos_lim - basket_position
+                qty_basket = [basket_ask_vol, implied_bid_vol, basket_lim, maxbuy]
 
+                # check positions of individual content
                 for prod in contents:
-                    best_bid = max(state.order_depths[prod].buy_orders.keys())
-                    content_orders[prod] = Order(prod, best_bid, -qty_basket * contents[prod])
+                    available = self.POS_LIM[prod] + current_positions[prod]
+                    if available <= 1:
+                        print("blocked by ", prod)
+                    qty_basket.append(available // contents[prod])
                 
-                return basket_order, content_orders
+                qty_basket = min(qty_basket)
+                if qty_basket > 0:
+                    basket_order = Order(basket, basket_best_ask, qty_basket)
+
+                    for prod in contents:
+                        best_bid = max(state.order_depths[prod].buy_orders.keys())
+                        content_orders[prod] = Order(prod, best_bid, -qty_basket * contents[prod])
+                    
+                    return basket_order, content_orders
   
         return None
 
@@ -762,10 +782,26 @@ class Trader:
 
         if logic == "trend" and len(self.history[prod]) > 30:
             sma = np.mean(self.history[prod][-30:])
-            if mid_price > sma + 2 and pos > -pos_lim:
-                orders.append(Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
-            elif mid_price < sma - 2 and pos < pos_lim:
-                orders.append(Order(prod, min(round_bid, bestbid), min(bid_vol, pos_lim-pos)))
+            if prod == "CROISSANTS":
+                real_pos_lim = self.POS_LIM["CROISSANTS"]
+                if pos < -int(0.7 * real_pos_lim) and mid_price < sma:
+                    # clear croissant; buy
+                    print("clearing croissant")
+                    buylim = real_pos_lim-pos
+                    orders.append(Order(prod, bestbid+1, min(50, int(0.5 * buylim))))
+                    orders.append(Order(prod, bestbid, min(50, int(0.5 * buylim))))
+                elif pos > int(0.7 * real_pos_lim) and mid_price > sma:
+                    # clear croissant; sell
+                    print("clearing croissant")
+                    selllim = real_pos_lim+pos
+                    orders.append(Order(prod, bestask-1, -min(50, int(0.5 * selllim))))
+                    orders.append(Order(prod, bestask, -min(50, int(0.5 * selllim))))
+                else:
+                    if mid_price > sma + 2 and pos > -pos_lim:
+                        orders.append(Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
+                    elif mid_price < sma - 2 and pos < pos_lim:
+                        orders.append(Order(prod, min(round_bid, bestbid), min(bid_vol, pos_lim-pos)))
+                    
 
         elif logic == "momentum" and len(self.history[prod]) > 20:
             delta = mid_price - self.history[prod][-20]
@@ -773,6 +809,7 @@ class Trader:
                 orders.append(Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
             elif delta < -3 and pos < pos_lim:
                 orders.append(Order(prod, min(round_bid, bestbid), min(bid_vol, pos_lim-pos)))
+
 
         elif logic == "breakout" and len(self.history[prod]) > 10:
             recent = self.history[prod][-10:]
@@ -804,6 +841,7 @@ class Trader:
                 self.slow_upper = traderObject["squid slow upper"]
                 self.slow_lower = traderObject["squid slow lower"]
                 self.spread_hist = traderObject["spread history"]
+                self.spread_signal = traderObject["spread signal"]
                 self.history = traderObject["history"]
         
         self.update_open_pos(state)
@@ -820,8 +858,8 @@ class Trader:
         result["DJEMBES"] = []
         baskets = ["PICNIC_BASKET1", "PICNIC_BASKET2"]
 
-        # window, mult1, mult2, clearlim, adverselim, maxbuy
-        MR_params = [(20, 2.5, 1.5, 10, 35, 15), (20, 2.5, 1.5, 15, 60, 15)]      
+        # window, mult1, adverselim, maxbuy, hits
+        MR_params = [(20, 2.3, 48, 7, 15), (20, 2.5, 75, 10, 15)]      
 
         current_positions = {prod: (state.position[prod] if prod in state.position else 0) 
                              for prod in self.basket_contents[baskets[0]]} 
@@ -850,6 +888,7 @@ class Trader:
                         "squid slow upper": self.slow_upper,
                         "squid slow lower": self.slow_lower,
                         "spread history": self.spread_hist,
+                        "spread signal": self.spread_signal,
                         "history": self.history}
         traderData = jsonpickle.encode(traderObject)
 
