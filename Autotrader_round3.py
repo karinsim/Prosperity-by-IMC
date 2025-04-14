@@ -26,14 +26,15 @@ class Trader:
             "VOLCANIC_ROCK_VOUCHER_10500": 200
         }
         self.prods = list(self.POS_LIM.keys())
-        self.basket_contents={"PICNIC_BASKET1": {"CROISSANTS": 6, "JAMS": 3, "DJEMBES": 1},
-                              "PICNIC_BASKET2": {"CROISSANTS": 4, "JAMS": 2}}
+        self.basket_contents = {"PICNIC_BASKET1": {"CROISSANTS": 6, "JAMS": 3, "DJEMBES": 1},
+                                "PICNIC_BASKET2": {"CROISSANTS": 4, "JAMS": 2}}
 
         # if tracking open position / relying on memory
         self.timer = 0
         self.open_buys = {prod: {} for prod in self.prods}
         self.open_sells = {prod: {} for prod in self.prods}
-        self.recorded_time = {prod: -1 for prod in self.prods}    # last recorded time of own_trades
+        # last recorded time of own_trades
+        self.recorded_time = {prod: -1 for prod in self.prods}
 
         # SQUID (replace with day 1 data)
         self.squid_hist = []
@@ -45,90 +46,90 @@ class Trader:
         # SPREAD (baskets)
         self.spread_hist = {"PICNIC_BASKET1": [], "PICNIC_BASKET2": []}
         self.history = {prod: [] for prod in self.prods}
-    
-    
+
     def black_scholes_call_price(S, K, T, sigma):
         """Calculate the theoretical price of a call option using Black-Scholes."""
         d1 = (math.log(S/K) + (0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
         d2 = d1 - sigma * math.sqrt(T)
         # Using the error function to get the standard normal CDF
-        
+
         N_d1 = 0.5 * (1 + math.erf(d1 / math.sqrt(2)))
         N_d2 = 0.5 * (1 + math.erf(d2 / math.sqrt(2)))
         return S * N_d1 - K * N_d2
 
     def update_open_pos(self, state: TradingState):
-            """
-            Update open positions according to updated own trades
-            Later try to buy/sell lower/higher than open trades
-            """
-            for prod in state.own_trades:
-                trades = state.own_trades[prod]
-                trades = [trade for trade in trades if trade.timestamp > self.recorded_time[prod]]
-                if len(trades) > 0:
-                    self.recorded_time[prod] = trades[0].timestamp
-                for trade in trades:
-                    remaining_quantity = trade.quantity
-                    if trade.buyer == "SUBMISSION":
-                        sold_price = sorted(list(self.open_sells[prod].keys()), reverse=True)
-                        # match with currently open positions
-                        for price in sold_price:  
-                            if trade.price >= price: 
-                                break  
-                            if remaining_quantity <= 0:
-                                break  
-                            
-                            if price in self.open_sells[prod]:
-                                available_quantity = self.open_sells[prod][price]
-                                if remaining_quantity >= available_quantity:  
-                                    remaining_quantity -= available_quantity  
-                                    del self.open_sells[prod][price]  
-                                else:  
-                                    self.open_sells[prod][price] -= remaining_quantity  
-                                    remaining_quantity = 0
-                            else:
-                                continue
-                        if remaining_quantity > 0:
-                            if trade.price in self.open_buys[prod]:
-                                self.open_buys[prod][trade.price] += remaining_quantity
-                            else:
-                                self.open_buys[prod][trade.price] = remaining_quantity
-                            
-                    else:
-                        bought_price = sorted(list(self.open_sells[prod].keys()))
-                        for price in bought_price:  
-                            if trade.price <= price: 
-                                break  
-                            if remaining_quantity <= 0:
-                                break 
-                            if price in self.open_buys[prod]:
-                                available_quantity = self.open_buys[prod][price]
-                                if remaining_quantity >= available_quantity:  
-                                    remaining_quantity -= available_quantity  
-                                    del self.open_buys[prod][price]  
-                                else:  
-                                    self.open_buys[prod][price] -= remaining_quantity  
-                                    remaining_quantity = 0
-                            else:
-                                continue
-                        if remaining_quantity > 0:
-                            if trade.price in self.open_sells[prod]:
-                                self.open_sells[prod][trade.price] += remaining_quantity
-                            else:
-                                self.open_sells[prod][trade.price] = remaining_quantity
+        """
+        Update open positions according to updated own trades
+        Later try to buy/sell lower/higher than open trades
+        """
+        for prod in state.own_trades:
+            trades = state.own_trades[prod]
+            trades = [trade for trade in trades if trade.timestamp >
+                      self.recorded_time[prod]]
+            if len(trades) > 0:
+                self.recorded_time[prod] = trades[0].timestamp
+            for trade in trades:
+                remaining_quantity = trade.quantity
+                if trade.buyer == "SUBMISSION":
+                    sold_price = sorted(
+                        list(self.open_sells[prod].keys()), reverse=True)
+                    # match with currently open positions
+                    for price in sold_price:
+                        if trade.price >= price:
+                            break
+                        if remaining_quantity <= 0:
+                            break
 
-                # sanity check: position
-                if prod not in state.position:
-                    if sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) != 0:
-                        print("BEEP! Open positions incorrectly tracked!")
-                    # assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == 0, \
-                    #     "BEEP! Open positions incorrectly tracked!"
+                        if price in self.open_sells[prod]:
+                            available_quantity = self.open_sells[prod][price]
+                            if remaining_quantity >= available_quantity:
+                                remaining_quantity -= available_quantity
+                                del self.open_sells[prod][price]
+                            else:
+                                self.open_sells[prod][price] -= remaining_quantity
+                                remaining_quantity = 0
+                        else:
+                            continue
+                    if remaining_quantity > 0:
+                        if trade.price in self.open_buys[prod]:
+                            self.open_buys[prod][trade.price] += remaining_quantity
+                        else:
+                            self.open_buys[prod][trade.price] = remaining_quantity
+
                 else:
-                    if sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) != state.position[prod]:
-                        print("BEEP! Open positions incorrectly tracked!")
-                    # assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == state.position[prod],\
-                    #     "BEEP! Open positions incorrectly tracked!"
+                    bought_price = sorted(list(self.open_sells[prod].keys()))
+                    for price in bought_price:
+                        if trade.price <= price:
+                            break
+                        if remaining_quantity <= 0:
+                            break
+                        if price in self.open_buys[prod]:
+                            available_quantity = self.open_buys[prod][price]
+                            if remaining_quantity >= available_quantity:
+                                remaining_quantity -= available_quantity
+                                del self.open_buys[prod][price]
+                            else:
+                                self.open_buys[prod][price] -= remaining_quantity
+                                remaining_quantity = 0
+                        else:
+                            continue
+                    if remaining_quantity > 0:
+                        if trade.price in self.open_sells[prod]:
+                            self.open_sells[prod][trade.price] += remaining_quantity
+                        else:
+                            self.open_sells[prod][trade.price] = remaining_quantity
 
+            # sanity check: position
+            if prod not in state.position:
+                if sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) != 0:
+                    print("BEEP! Open positions incorrectly tracked!")
+                # assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == 0, \
+                #     "BEEP! Open positions incorrectly tracked!"
+            else:
+                if sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) != state.position[prod]:
+                    print("BEEP! Open positions incorrectly tracked!")
+                # assert sum(self.open_buys[prod].values()) - sum(self.open_sells[prod].values()) == state.position[prod],\
+                #     "BEEP! Open positions incorrectly tracked!"
 
     def check_orders(self, orders, prod):
         ### SANITY CHECK BECAUSE I'M SCARRED FROM THE TYPO IN ROUND 1 ###
@@ -151,7 +152,6 @@ class Trader:
             return [order for i, order in enumerate(orders) if i not in set(remove)]
         else:
             return orders
-
 
     def order_resin(self, state: TradingState):
         orders: list[Order] = []
@@ -186,11 +186,11 @@ class Trader:
             ask, ask_amount = sellorder
             if ask > fairprice:
                 break
-            asks.append(ask) 
+            asks.append(ask)
             if current_long < pos_lim:
                 if ask < fairprice:
                     mybuyvol = min(-ask_amount, pos_lim-current_long)
-                    assert(mybuyvol >= 0), "Buy volume negative"
+                    assert (mybuyvol >= 0), "Buy volume negative"
                     orders.append(Order(prod, ask, mybuyvol))
                     current_long += mybuyvol
 
@@ -198,12 +198,12 @@ class Trader:
             bid, bid_amount = buyorder
             if bid < fairprice:
                 break
-            bids.append(bid) 
+            bids.append(bid)
             if current_short > -pos_lim:
                 if bid > fairprice:
                     mysellvol = min(bid_amount, pos_lim+current_short)
                     mysellvol *= -1
-                    assert(mysellvol <= 0), "Sell volume positive"
+                    assert (mysellvol <= 0), "Sell volume positive"
                     orders.append(Order(prod, bid, mysellvol))
                     current_short += mysellvol
 
@@ -221,7 +221,7 @@ class Trader:
 
         # market making: fill the remaining orders up to position limit
         bestask, bestbid = sellorders[0][0], buyorders[0][0]
-        mmask = min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
+        mmask = min(order_depth.sell_orders, key=order_depth.sell_orders.get)
         mmbid = max(order_depth.buy_orders, key=order_depth.buy_orders.get)
 
         if current_long < pos_lim:
@@ -241,7 +241,6 @@ class Trader:
 
         return orders
 
-
     def order_kelp(self, state: TradingState, sigma, m, c):
         prod = "KELP"
         orders: list[Order] = []
@@ -257,8 +256,8 @@ class Trader:
         # print("buy", order_depth.buy_orders)
 
         # calculate fairprice based on market-making bots
-        fairprice = (min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
-              + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
+        fairprice = (min(order_depth.sell_orders, key=order_depth.sell_orders.get)
+                     + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
         round_bid = round(fairprice - 1)
         round_ask = round(fairprice + 0.5)
 
@@ -285,13 +284,13 @@ class Trader:
                 current_long += current_pos
             else:
                 current_short += current_pos
-        
+
         else:
             current_pos = 0
-        
+
         sellorders = sorted(list(order_depth.sell_orders.items()))
         buyorders = sorted(list(order_depth.buy_orders.items()), reverse=True)
-        
+
         # market taking
         asks, bids = [], []
         for sellorder in sellorders:
@@ -302,7 +301,7 @@ class Trader:
             if current_long < pos_lim:
                 if ask < fairprice:
                     mybuyvol = min(-ask_amount, pos_lim-current_long)
-                    assert(mybuyvol >= 0), "Buy volume negative"
+                    assert (mybuyvol >= 0), "Buy volume negative"
                     orders.append(Order(prod, ask, mybuyvol))
                     current_long += mybuyvol
 
@@ -317,22 +316,25 @@ class Trader:
                     mysellvol *= -1
                     orders.append(Order(prod, bid, mysellvol))
                     current_short += mysellvol
-        
+
         # clear open positions if approaching position limit
         if current_long > long_lim and current_short > -pos_lim:
             mysellvol = min(current_short+pos_lim, current_long-long_lim)
             if len(self.open_buys[prod]) > 0:
-                bought_prices = sorted(list(self.open_buys[prod].keys()), reverse=True)
+                bought_prices = sorted(
+                    list(self.open_buys[prod].keys()), reverse=True)
                 i = 0
                 while mysellvol > 0 and i < len(bought_prices) and current_short > -pos_lim:
-                    qty = min(mysellvol, self.open_buys[prod][bought_prices[i]], current_short+pos_lim)
+                    qty = min(
+                        mysellvol, self.open_buys[prod][bought_prices[i]], current_short+pos_lim)
                     orders.append(Order(prod, int(bought_prices[i]+1), -qty))
                     i += 1
                     mysellvol -= qty
                     current_short -= qty
             else:
                 if len(bids) > 0:
-                    orders.append(Order(prod, max(bids[0], round_ask), -mysellvol))
+                    orders.append(
+                        Order(prod, max(bids[0], round_ask), -mysellvol))
                 else:
                     orders.append(Order(prod, round_ask, -mysellvol))
                 current_short -= mysellvol
@@ -342,30 +344,32 @@ class Trader:
                 sold_prices = sorted(list(self.open_sells[prod].keys()))
                 i = 0
                 while mybuyvol > 0 and i < len(sold_prices) and current_long < pos_lim:
-                    qty = min(mybuyvol, self.open_sells[prod][sold_prices[i]], pos_lim-current_long)
+                    qty = min(
+                        mybuyvol, self.open_sells[prod][sold_prices[i]], pos_lim-current_long)
                     orders.append(Order(prod, int(sold_prices[i]-1), qty))
                     i += 1
                     mybuyvol -= qty
                     current_long += qty
             else:
                 if len(asks) > 0:
-                    orders.append(Order(prod, min(asks[0], round_bid), mybuyvol))
+                    orders.append(
+                        Order(prod, min(asks[0], round_bid), mybuyvol))
                 else:
                     orders.append(Order(prod, round_bid, mybuyvol))
                 current_long += mybuyvol
 
         # market making: fill the remaining orders up to position limit
         bestask, bestbid = sellorders[0][0], buyorders[0][0]
-        mmask = min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
+        mmask = min(order_depth.sell_orders, key=order_depth.sell_orders.get)
         mmbid = max(order_depth.buy_orders, key=order_depth.buy_orders.get)
-    
+
         if current_long < pos_lim:
             qty = pos_lim - current_long
             if signal == "BUY":     # want to buy more at the cost of profit
                 if bestbid < fairprice:
                     price = min(bestbid+1, int(fairprice+0.5))
                 else:
-                    price = min(mmbid+1, int(fairprice+0.5))  
+                    price = min(mmbid+1, int(fairprice+0.5))
             else:       # prioritise profit
                 price = min(round_bid, bestbid+1, bestask)
             orders.append(Order(prod, price, qty))
@@ -380,13 +384,12 @@ class Trader:
                 price = max(round_ask, bestask-1, bestbid)
 
             orders.append(Order(prod, price, -qty))
-    
+
         ### SANITY CHECK BECAUSE I'M SCARRED FROM THE TYPO IN ROUND 1 ###
         orders = self.check_orders(orders, prod)
 
         # print("orders: ", orders)
         return orders
-
 
     def order_squid(self, state: TradingState):
         prod = "SQUID_INK"
@@ -416,15 +419,15 @@ class Trader:
         # print("buy", order_depth.buy_orders)
 
         # calculate fairprice based on market-making bots
-        fairprice = (min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
-              + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
-        
+        fairprice = (min(order_depth.sell_orders, key=order_depth.sell_orders.get)
+                     + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
+
         round_bid = round(fairprice - 1)
         round_ask = round(fairprice + 0.5)
 
         self.squid_hist.append(fairprice)
         self.squid_hist = self.squid_hist[-window_slow:]
-        
+
         # track long and short separately to prevent cancelling out
         current_short, current_long = 0, 0
         if prod in state.position:
@@ -441,7 +444,7 @@ class Trader:
         if len(self.squid_hist) >= window_fast:
             sma_fast = np.mean(np.array(self.squid_hist[-window_fast:]))
             std_fast = np.std(np.array(self.squid_hist[-window_fast:]), ddof=1)
-            z_fast= (self.squid_hist[-1] - sma_fast) / std_fast
+            z_fast = (self.squid_hist[-1] - sma_fast) / std_fast
 
         if len(self.squid_hist) == window_slow:
             sma_slow = np.mean(np.array(self.squid_hist))
@@ -478,7 +481,7 @@ class Trader:
                     self.slow_upper = 0
                 elif z_slow > mult:
                     self.slow_upper += 1
-                    self.slow_lower = 0  
+                    self.slow_lower = 0
 
             if self.slow_upper >= strong_hits:      # strong sell
                 strong_signal = "SELL"
@@ -486,7 +489,7 @@ class Trader:
             elif self.slow_lower >= strong_hits:        # strong buy
                 strong_signal = "BUY"
                 self.slow_lower = self.slow_upper = 0
-            
+
         sellorders = sorted(list(order_depth.sell_orders.items()))
         buyorders = sorted(list(order_depth.buy_orders.items()), reverse=True)
         asks = [item[0] for item in sellorders]
@@ -517,13 +520,13 @@ class Trader:
             #     #     orders.append(Order(prod, ask, mybuyvol))
             #     #     current_long += mybuyvol
             #     print("LARGE SWING (BUY), min bought: ", minbought)
-            
+
             # else:
             if (strong_signal == "BUY" or action == "BUY") and (current_long < soft_lim):
                 if (ask <= fairprice and ask < maxbought) or (ask > fairprice and ask < minbought):
                     mybuyvol = min(-ask_amount, soft_lim-current_long)
                     mybuyvol = min(mybuyvol, maxqty)
-                    assert(mybuyvol >= 0), "Buy volume negative"
+                    assert (mybuyvol >= 0), "Buy volume negative"
                     # update minbought to avoid buying higher in the same timestep
                     if minbought == -1 or ask < minbought:
                         minbought = ask
@@ -542,14 +545,14 @@ class Trader:
             #     #     orders.append(Order(prod, bid, mysellvol))
             #     #     current_short += mysellvol
             #     print("LARGE SWING (SELL), maxsold: ", maxsold, bid)
-            
+
             # else:
             if (strong_signal == "SELL" or action == "SELL") and current_short > -soft_lim:
                 if (bid >= fairprice and bid > minsold) or (bid < fairprice and bid > maxsold):
                     mysellvol = min(bid_amount, soft_lim+current_short)
                     mysellvol = min(mysellvol, maxqty)
                     mysellvol *= -1
-                    assert(mysellvol <= 0), "Sell volume positive"
+                    assert (mysellvol <= 0), "Sell volume positive"
                     # update maxsold to avoid selling lower in the same timestep
                     if bid > maxsold:
                         maxsold = bid
@@ -567,9 +570,10 @@ class Trader:
                     elif asks[0] > price:
                         orders.append(Order(prod, asks[0]-1, -qty))
                     else:
-                        orders.append(Order(prod, max(int(price), int(fairprice+0.5)), -qty))
+                        orders.append(
+                            Order(prod, max(int(price), int(fairprice+0.5)), -qty))
                     current_short -= qty
-        
+
         if current_short < -clear_lim:
             for price in sold_prices:
                 qty = min(self.open_sells[prod][price], soft_lim-current_long)
@@ -579,9 +583,10 @@ class Trader:
                     elif bids[0] < price:
                         orders.append(Order(prod, bids[0]+1, qty))
                     else:
-                        orders.append(Order(prod, min(int(price), int(fairprice)), qty))
+                        orders.append(
+                            Order(prod, min(int(price), int(fairprice)), qty))
                     current_long += qty
-            
+
         # market making: strong signal (ignore soft limits)
         bestbid = buyorders[0][0]
         bestask = sellorders[0][0]
@@ -598,12 +603,11 @@ class Trader:
             print("STRONG SELL")
 
         return self.check_orders(orders, prod)
-            
 
     def order_basket(self, state: TradingState, current_positions,
-                     basket="PICNIC_BASKET1", window=20, mult1=2.5, mult2=1.2, 
+                     basket="PICNIC_BASKET1", window=20, mult1=2.5, mult2=1.2,
                      clear_lim=20, adverse_lim=40, maxbuy=5):
-        
+
         # atm only try to either market take or clear positions, not both together
 
         if basket not in state.order_depths:
@@ -616,7 +620,7 @@ class Trader:
         basket_position = 0
         if basket in state.position:
             basket_position = state.position[basket]
-        
+
         if np.abs(basket_position) >= pos_lim:
             print("POSITION LIMIT REACHED! "+basket)
             return None
@@ -626,7 +630,7 @@ class Trader:
         basket_best_ask = min(basket_order_depth.sell_orders.keys())
         basket_bid_vol = basket_order_depth.buy_orders[basket_best_bid]
         basket_ask_vol = -basket_order_depth.sell_orders[basket_best_ask]
-        basket_swmp = (basket_best_bid * basket_ask_vol + 
+        basket_swmp = (basket_best_bid * basket_ask_vol +
                        basket_best_ask * basket_bid_vol) / (basket_bid_vol + basket_ask_vol)
 
         # get synthetic (implied) midprice
@@ -646,16 +650,18 @@ class Trader:
             implied_ask += contents[prod] * best_ask
 
             if best_bid > 0:
-                bid_vols.append(state.order_depths[prod].buy_orders[best_bid] // contents[prod])
+                bid_vols.append(
+                    state.order_depths[prod].buy_orders[best_bid] // contents[prod])
             if best_ask < float("inf"):
-                ask_vols.append(-state.order_depths[prod].sell_orders[best_ask] // contents[prod])
-        
+                ask_vols.append(
+                    -state.order_depths[prod].sell_orders[best_ask] // contents[prod])
+
         if implied_bid > 0 and implied_ask < float("inf"):
             implied_ask_vol = min(ask_vols)
             implied_bid_vol = min(bid_vols)
-            synthetic_swmp = (implied_bid * implied_ask_vol + 
+            synthetic_swmp = (implied_bid * implied_ask_vol +
                               implied_ask * implied_bid_vol) / (implied_bid_vol + implied_ask_vol)
-        
+
         else:
             return None         # contents midprice unavailable
 
@@ -670,7 +676,7 @@ class Trader:
         # mean reversion
         sma = np.mean(spread_hist)
         std = np.std(spread_hist, ddof=1)
-        
+
         content_orders = {}
 
         # clear orders
@@ -678,28 +684,32 @@ class Trader:
             if spread_hist[-1] - sma <= - mult2 * std:
                 print("CLEAR BUY BASKET")
                 basket_lim = pos_lim - basket_position
-                mybuyvol = [-(basket_position+clear_lim), implied_bid_vol, basket_lim]
+                mybuyvol = [-(basket_position+clear_lim),
+                            implied_bid_vol, basket_lim]
 
                 # check positions of individual content (to sell)
                 for prod in contents:
                     available = self.POS_LIM[prod] + current_positions[prod]
                     mybuyvol.append(available // contents[prod])
-                
+
                 mybuyvol = min(mybuyvol)
                 if mybuyvol > 0:
                     basket_order = Order(basket, basket_best_ask, mybuyvol)
 
                     for prod in contents:
-                        best_bid = max(state.order_depths[prod].buy_orders.keys())
-                        content_orders[prod] = Order(prod, best_bid, -mybuyvol * contents[prod])
-                    
+                        best_bid = max(
+                            state.order_depths[prod].buy_orders.keys())
+                        content_orders[prod] = Order(
+                            prod, best_bid, -mybuyvol * contents[prod])
+
                     return basket_order, content_orders
-        
+
         if basket_position >= clear_lim:
             if spread_hist[-1] - sma >= mult2 * std:
                 print("CLEAR SELL BASKET")
                 basket_lim = basket_position + pos_lim
-                mysellvol = [basket_position-clear_lim, implied_ask_vol, basket_lim]
+                mysellvol = [basket_position-clear_lim,
+                             implied_ask_vol, basket_lim]
 
                 # check positions of individual content
                 for prod in contents:
@@ -709,8 +719,10 @@ class Trader:
                 if mysellvol > 0:
                     basket_order = Order(basket, basket_best_bid, -mysellvol)
                     for prod in contents:
-                        best_ask = min(state.order_depths[prod].buy_orders.keys())
-                        content_orders[prod] = Order(prod, best_ask, mysellvol * contents[prod])
+                        best_ask = min(
+                            state.order_depths[prod].buy_orders.keys())
+                        content_orders[prod] = Order(
+                            prod, best_ask, mysellvol * contents[prod])
                     return basket_order, content_orders
 
         # implied_ask_vol, basket_ask_vol both positive
@@ -724,15 +736,16 @@ class Trader:
             for prod in contents:
                 available = self.POS_LIM[prod] - current_positions[prod]
                 qty_basket.append(available // contents[prod])
-            
+
             qty_basket = min(qty_basket)
             if qty_basket > 0:
                 basket_order = Order(basket, basket_best_bid, -qty_basket)
 
                 for prod in contents:
                     best_ask = min(state.order_depths[prod].buy_orders.keys())
-                    content_orders[prod] = Order(prod, best_ask, qty_basket * contents[prod])
-                
+                    content_orders[prod] = Order(
+                        prod, best_ask, qty_basket * contents[prod])
+
                 return basket_order, content_orders
 
         if spread_hist[-1] - sma <= - mult1 * std and basket_position < adverse_lim:
@@ -745,19 +758,19 @@ class Trader:
             for prod in contents:
                 available = self.POS_LIM[prod] + current_positions[prod]
                 qty_basket.append(available // contents[prod])
-            
+
             qty_basket = min(qty_basket)
             if qty_basket > 0:
                 basket_order = Order(basket, basket_best_ask, qty_basket)
 
                 for prod in contents:
                     best_bid = max(state.order_depths[prod].buy_orders.keys())
-                    content_orders[prod] = Order(prod, best_bid, -qty_basket * contents[prod])
-                
-                return basket_order, content_orders
-  
-        return None
+                    content_orders[prod] = Order(
+                        prod, best_bid, -qty_basket * contents[prod])
 
+                return basket_order, content_orders
+
+        return None
 
     def order_component(self, state: TradingState, prod: str, logic: str, pos_lim: int):
         # written by Nikola
@@ -768,8 +781,8 @@ class Trader:
         sellorders = sorted(list(order_depth.sell_orders.items()))
         buyorders = sorted(list(order_depth.buy_orders.items()), reverse=True)
         if order_depth.buy_orders and order_depth.sell_orders:
-            mid_price = (min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
-              + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
+            mid_price = (min(order_depth.sell_orders, key=order_depth.sell_orders.get)
+                         + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
             round_bid = round(mid_price - 1)
             round_ask = round(mid_price + 0.5)
         else:
@@ -782,44 +795,32 @@ class Trader:
         if logic == "trend" and len(self.history[prod]) > 30:
             sma = np.mean(self.history[prod][-30:])
             if mid_price > sma + 2 and pos > -pos_lim:
-                orders.append(Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
+                orders.append(
+                    Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
             elif mid_price < sma - 2 and pos < pos_lim:
-                orders.append(Order(prod, min(round_bid, bestbid), min(bid_vol, pos_lim-pos)))
+                orders.append(Order(prod, min(round_bid, bestbid),
+                              min(bid_vol, pos_lim-pos)))
 
         elif logic == "momentum" and len(self.history[prod]) > 20:
             delta = mid_price - self.history[prod][-20]
             if delta > 3 and pos > -pos_lim:
-                orders.append(Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
+                orders.append(
+                    Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
             elif delta < -3 and pos < pos_lim:
-                orders.append(Order(prod, min(round_bid, bestbid), min(bid_vol, pos_lim-pos)))
+                orders.append(Order(prod, min(round_bid, bestbid),
+                              min(bid_vol, pos_lim-pos)))
 
         elif logic == "breakout" and len(self.history[prod]) > 10:
             recent = self.history[prod][-10:]
             if mid_price > max(recent) and pos > -pos_lim:
-                orders.append(Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
+                orders.append(
+                    Order(prod, max(round_ask, bestask), -min(pos_lim+pos, -ask_vol)))
             elif mid_price < min(recent) and pos < pos_lim:
-                orders.append(Order(prod, min(round_bid, bestbid), min(bid_vol, pos_lim-pos)))
+                orders.append(Order(prod, min(round_bid, bestbid),
+                              min(bid_vol, pos_lim-pos)))
 
         return orders
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
     def order_volcanic_rock(self, state: TradingState):
         """
         Basic market making for the underlying VOLCANIC_ROCK.
@@ -844,7 +845,7 @@ class Trader:
                 mid_price = min(order_depth.sell_orders.keys())
             else:
                 return orders
-        
+
         self.history["VOLCANIC_ROCK"].append(mid_price)
 
         current_pos = state.position.get(prod, 0)
@@ -879,8 +880,10 @@ class Trader:
         # Get the underlying mid-price for VOLCANIC_ROCK.
         underlying = "VOLCANIC_ROCK"
         if underlying in state.order_depths and state.order_depths[underlying].buy_orders and state.order_depths[underlying].sell_orders:
-            best_bid_und = max(state.order_depths[underlying].buy_orders.keys())
-            best_ask_und = min(state.order_depths[underlying].sell_orders.keys())
+            best_bid_und = max(
+                state.order_depths[underlying].buy_orders.keys())
+            best_ask_und = min(
+                state.order_depths[underlying].sell_orders.keys())
             S = (best_bid_und + best_ask_und) / 2
         else:
             return orders
@@ -890,10 +893,9 @@ class Trader:
             strike = float(option.split("_")[-1])
         except Exception:
             return orders
-        
 
-        remaining_time = (6*(10**6)) - self.timer
-        T = remaining_time / (365*(10**6))
+        remaining_time = 5e6 - state.timestamp
+        T = remaining_time / 365e6
         if underlying in self.history and len(self.history[underlying]) >= 100:
             # Use the most recent 1000 prices
             prices = np.array(self.history[underlying][-100:])
@@ -902,8 +904,9 @@ class Trader:
             sigma = np.std(log_returns, ddof=1) * np.sqrt(365e4)
         else:
             sigma = 0.34  # fallback value
-        
-        theoretical_price = Trader.black_scholes_call_price(S, strike, T, sigma)
+
+        theoretical_price = Trader.black_scholes_call_price(
+            S, strike, T, sigma)
         print(f"theoretical price: {theoretical_price}")
         # Determine the current market mid-price for the option.
         if order_depth.buy_orders and order_depth.sell_orders:
@@ -936,39 +939,27 @@ class Trader:
                     current_pos -= qty
         """
         # buy for one over fair price, sell for 1 under fair
-        orders.append(Order(option, round(theoretical_price)-2, pos_lim-current_pos))
-        orders.append(Order(option, round(theoretical_price)+2, -pos_lim-current_pos))
-        
+        orders.append(
+            Order(option, round(theoretical_price)-2, pos_lim-current_pos))
+        orders.append(
+            Order(option, round(theoretical_price)+2, -pos_lim-current_pos))
+
         return orders
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
 
     def run(self, state: TradingState):
         self.timer += 100
 
         ### UPDATE WITH DAY N DATA ###
-        linreg = {"KELP":  (14.422964389386117, 1.173227183514493e-05, 2052.6409802838834)}
+        linreg = {"KELP":  (14.422964389386117,
+                            1.173227183514493e-05, 2052.6409802838834)}
 
         if self.timer != state.timestamp:
             if state.traderData != None and state.traderData != "":
                 traderObject = jsonpickle.decode(state.traderData)
                 self.open_buys = {item: {float(k): v for k, v in inner.items()}
-                                for item, inner in traderObject["open buys"].items()}
+                                  for item, inner in traderObject["open buys"].items()}
                 self.open_sells = {item: {float(k): v for k, v in inner.items()}
-                                for item, inner in traderObject["open sells"].items()}
+                                   for item, inner in traderObject["open sells"].items()}
                 self.recorded_time = traderObject["recorded time"]
                 self.squid_hist = traderObject["squid history"]
                 self.upper = traderObject["squid upper"]
@@ -977,7 +968,7 @@ class Trader:
                 self.slow_lower = traderObject["squid slow lower"]
                 self.spread_hist = traderObject["spread history"]
                 self.history = traderObject["history"]
-        
+
         self.update_open_pos(state)
 
         result = {}
@@ -991,78 +982,47 @@ class Trader:
             result["JAMS"] = []
             result["DJEMBES"] = []
             baskets = ["PICNIC_BASKET1", "PICNIC_BASKET2"]
-    
+
             # window, mult1, mult2, clearlim, adverselim, maxbuy
-            MR_params = [(20, 2.5, 1.5, 10, 35, 15), (20, 2.5, 1.5, 15, 60, 15)]      
-    
-            current_positions = {prod: (state.position[prod] if prod in state.position else 0) 
-                                 for prod in self.basket_contents[baskets[0]]} 
+            MR_params = [(20, 2.5, 1.5, 10, 35, 15),
+                         (20, 2.5, 1.5, 15, 60, 15)]
+
+            current_positions = {prod: (state.position[prod] if prod in state.position else 0)
+                                 for prod in self.basket_contents[baskets[0]]}
             for basket, args in zip(baskets, MR_params):
-                spread_order = self.order_basket(state, current_positions, basket, *args)
+                spread_order = self.order_basket(
+                    state, current_positions, basket, *args)
                 if spread_order is not None:
                     basket_order, content_orders = spread_order
                     result[basket] = [basket_order]
                     for prod in content_orders:
                         result[prod].append(content_orders[prod])
                         current_positions[prod] += content_orders[prod].quantity
-            
+
             # only order the individual contents if not ordering baskets
             if "PICNIC_BASKET1" not in result:
-                result["DJEMBES"] = self.order_component(state, "DJEMBES", logic="breakout", pos_lim=10)
+                result["DJEMBES"] = self.order_component(
+                    state, "DJEMBES", logic="breakout", pos_lim=10)
                 if "PICNIC_BASKET2" not in result:
-                    result["CROISSANTS"] = self.order_component(state, "CROISSANTS", logic="trend", pos_lim=15)
-                    result["JAMS"] = self.order_component(state, "JAMS", logic="momentum", pos_lim=20)
-            
-            
-            
-            
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
+                    result["CROISSANTS"] = self.order_component(
+                        state, "CROISSANTS", logic="trend", pos_lim=15)
+                    result["JAMS"] = self.order_component(
+                        state, "JAMS", logic="momentum", pos_lim=20)
+
             # New asset: VOLCANIC_ROCK and its options
         result["VOLCANIC_ROCK"] = self.order_volcanic_rock(state)
         options = [
-           "VOLCANIC_ROCK_VOUCHER_9500",
-           "VOLCANIC_ROCK_VOUCHER_9750",
-           "VOLCANIC_ROCK_VOUCHER_10000",
-           "VOLCANIC_ROCK_VOUCHER_10250",
-           "VOLCANIC_ROCK_VOUCHER_10500"
+            "VOLCANIC_ROCK_VOUCHER_9500",
+            "VOLCANIC_ROCK_VOUCHER_9750",
+            "VOLCANIC_ROCK_VOUCHER_10000",
+            "VOLCANIC_ROCK_VOUCHER_10250",
+            "VOLCANIC_ROCK_VOUCHER_10500"
         ]
         for option in options:
-           result[option] = self.order_volcanic_rock_option(state, option)
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-        traderObject = {"open buys": self.open_buys, 
-                        "open sells": self.open_sells, 
+            result[option] = self.order_volcanic_rock_option(state, option)
+
+        traderObject = {"open buys": self.open_buys,
+                        "open sells": self.open_sells,
                         "recorded time": self.recorded_time,
                         "squid history": self.squid_hist,
                         "squid upper": self.upper,
