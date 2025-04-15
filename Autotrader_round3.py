@@ -5,6 +5,7 @@ import string
 import numpy as np
 import json
 import math
+import statistics as st
 
 
 class Trader:
@@ -47,15 +48,38 @@ class Trader:
         self.spread_hist = {"PICNIC_BASKET1": [], "PICNIC_BASKET2": []}
         self.history = {prod: [] for prod in self.prods}
 
-    def black_scholes_call_price(S, K, T, sigma):
-        """Calculate the theoretical price of a call option using Black-Scholes."""
-        d1 = (math.log(S/K) + (0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
+    def black_scholes_call_price(S, K, T, sigma,r):
+        """
+        Computes the Black-Scholes price for a call option.
+        S: Underlying price
+        K: Strike price
+        T: Time to expiration (in years)
+        r: Risk-free rate
+        sigma: Volatility
+        
+        print(f"Underlying price: {S}")
+        print(f"Strike price: {K}")
+        print(f"Time to expiration (in years): {T}")
+        print(f"Risk-free rate: {r}")
+        print(f"Volatility: {sigma}")
+        """
+        d1 = (math.log(S/K) + (r+ 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
         d2 = d1 - sigma * math.sqrt(T)
+        
         # Using the error function to get the standard normal CDF
-
         N_d1 = 0.5 * (1 + math.erf(d1 / math.sqrt(2)))
         N_d2 = 0.5 * (1 + math.erf(d2 / math.sqrt(2)))
-        return S * N_d1 - K * N_d2
+        return S * N_d1 - K * N_d2*math.exp(-r*T)
+    
+    
+    # Regression-based volatility estimator
+    def estimated_volatility(S, K, a=0.150195656, b=-1.15870319e-06, c=1.23214223e-07):
+        """
+        Computes volatility from the linear regression equation.
+        x is defined as the difference between the underlying price and the strike price.
+        """
+        x = S - K
+        return a + b * x + c * x**2
 
     def update_open_pos(self, state: TradingState):
         """
@@ -894,8 +918,9 @@ class Trader:
         except Exception:
             return orders
 
-        remaining_time = 5e6 - state.timestamp
+        remaining_time = 6e6 - state.timestamp
         T = remaining_time / 365e6
+        """
         if underlying in self.history and len(self.history[underlying]) >= 100:
             # Use the most recent 1000 prices
             prices = np.array(self.history[underlying][-100:])
@@ -904,22 +929,49 @@ class Trader:
             sigma = np.std(log_returns, ddof=1) * np.sqrt(365e4)
         else:
             sigma = 0.34  # fallback value
+        """    
+        #r= -0.16 # 40k$ delta-6.433
+        #r= 0.02 # 2.5k$, delta 11.9700
+        #r= 0.0001 # 18k$, delta 
+        #r= -0.06 # 39.4k$, delta  3.7058
+        r = 0
+        
+        
+        sigma_est = Trader.estimated_volatility(S, strike)
+        theoretical_price = Trader.black_scholes_call_price(S, strike, T, sigma_est, r)
+        # Correct theoretical price using the average deviation.
+        if strike == 9500:
+            avg_diff = -0.0332
+        elif strike == 9750:
+            avg_diff = 0.0652
+        elif strike == 10000:
+            avg_diff = 0.3740
+        elif strike == 10250:
+            avg_diff = 0.7489
+        elif strike == 10500:
+            avg_diff = 0.4404
+        else:
+            avg_diff = 0.0
+        corrected_price = theoretical_price - avg_diff
+        theoretical_price=corrected_price
 
-        theoretical_price = Trader.black_scholes_call_price(
-            S, strike, T, sigma)
         print(f"theoretical price: {theoretical_price}")
+        #print(f"sigma_est: {sigma_est}")
         # Determine the current market mid-price for the option.
         if order_depth.buy_orders and order_depth.sell_orders:
             best_bid = max(order_depth.buy_orders.keys())
             best_ask = min(order_depth.sell_orders.keys())
             market_mid = (best_bid + best_ask) / 2
         else:
+            market_mid = 0
+            """
             if order_depth.buy_orders:
                 market_mid = max(order_depth.buy_orders.keys())
             elif order_depth.sell_orders:
                 market_mid = min(order_depth.sell_orders.keys())
             else:
                 return orders
+            """
         print(f"Market mid: {market_mid}")
         current_pos = state.position.get(option, 0)
         # Underpriced: if market price is below theoretical value, then buy
@@ -940,9 +992,9 @@ class Trader:
         """
         # buy for one over fair price, sell for 1 under fair
         orders.append(
-            Order(option, round(theoretical_price)-2, pos_lim-current_pos))
+            Order(option, round(theoretical_price*0-95), pos_lim-current_pos))
         orders.append(
-            Order(option, round(theoretical_price)+2, -pos_lim-current_pos))
+            Order(option, round(theoretical_price+1.05), -pos_lim-current_pos))
 
         return orders
 
