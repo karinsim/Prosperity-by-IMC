@@ -48,7 +48,7 @@ class Trader:
         self.spread_hist = {"PICNIC_BASKET1": [], "PICNIC_BASKET2": []}
         self.history = {prod: [] for prod in self.prods}
 
-    def black_scholes_call_price(S, K, T, sigma, r):
+    def black_scholes_call_price(S, K, T, sigma,r):
         """
         Computes the Black-Scholes price for a call option.
         S: Underlying price
@@ -57,17 +57,16 @@ class Trader:
         r: Risk-free rate
         sigma: Volatility
         """
-        d1 = (math.log(S/K) + (r + 0.5 * sigma**2) * T) / \
-            (sigma * math.sqrt(T))
+        d1 = (math.log(S/K) + (r+ 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
         d2 = d1 - sigma * math.sqrt(T)
-
+        
         # Using the error function to get the standard normal CDF
         N_d1 = 0.5 * (1 + math.erf(d1 / math.sqrt(2)))
         N_d2 = 0.5 * (1 + math.erf(d2 / math.sqrt(2)))
         return S * N_d1 - K * N_d2*math.exp(-r*T)
-
+    
+    
     # Regression-based volatility estimator
-
     def estimated_volatility(S, K, a=0.150195656, b=-1.15870319e-06, c=1.23214223e-07):
         """
         Computes volatility from the linear regression equation.
@@ -890,7 +889,7 @@ class Trader:
         orders: list[Order] = []
         if option not in state.order_depths:
             return orders
-
+        order_depth = state.order_depths[option]
         pos_lim = self.POS_LIM[option]
 
         # Get the underlying mid-price for VOLCANIC_ROCK.
@@ -910,15 +909,14 @@ class Trader:
         except Exception:
             return orders
 
-        # !!!!!!!!!!!!!!!!NEEDS TO BE UPDATED TO CURRENT DATE (8-N_ROUND)!!!!!!
-        remaining_time = 5e6 - state.timestamp
+        remaining_time = 6e6 - state.timestamp
         T = remaining_time / 365e6
         r = 0
-
+        
+        
         sigma_est = Trader.estimated_volatility(S, strike)
-        theoretical_price = Trader.black_scholes_call_price(
-            S, strike, T, sigma_est, r)
-        # Correct theoretical price using the average deviation.
+        theoretical_price = Trader.black_scholes_call_price(S, strike, T, sigma_est, r)
+        # Correct theoretical price using the average deviation (#numerics stuff).
         if strike == 9500:
             avg_diff = -0.0332
         elif strike == 9750:
@@ -932,10 +930,18 @@ class Trader:
         else:
             avg_diff = 0.0
         corrected_price = theoretical_price - avg_diff
-        theoretical_price = corrected_price
+        theoretical_price=corrected_price
+
+        # Determine the current market mid-price for the option.
+        if order_depth.buy_orders and order_depth.sell_orders:
+            best_bid = max(order_depth.buy_orders.keys())
+            best_ask = min(order_depth.sell_orders.keys())
+            market_mid = (best_bid + best_ask) / 2
+        else:
+            market_mid = 0
 
         current_pos = state.position.get(option, 0)
-
+        
         # sd = standard deviation of estimate to actual
         if strike == 9500:
             sd = 0.2973
@@ -949,20 +955,25 @@ class Trader:
             sd = 0.2947
         else:
             sd = 0.4
-
+            
         print(f"Current pos: {current_pos}")
+        
+        
         # buy
+        orders.append(
+            Order(option, round(theoretical_price-sd*0.4*np.exp((current_pos)/200)), pos_lim-current_pos))
+
+        # sell
+        orders.append(
+            Order(option, round(theoretical_price+sd*0.4*np.exp((-current_pos)/200)), -pos_lim-current_pos))
+
         # sd*0.4*np.exp((current_pos)/200) is a safety margin on top of the
         # price estimate to ensure profitability
         # Is dependent on current position in relation to the limit to increase
         # the propensity to sell and decrease the propensity to buy, when the upper
         # limit is approached and vice verca.
-        orders.append(
-            Order(option, round(theoretical_price-sd*0.4*np.exp((current_pos)/200)), pos_lim-current_pos))
-        # sell
-        orders.append(
-            Order(option, round(theoretical_price+sd*0.4*np.exp((-current_pos)/200)), -pos_lim-current_pos))
-
+        
+        
         return orders
 
     def run(self, state: TradingState):
