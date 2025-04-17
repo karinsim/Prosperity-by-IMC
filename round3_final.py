@@ -873,75 +873,22 @@ class Trader:
         bestbid = buyorders[0][0]
         bestask = sellorders[0][0]
         if self.strong_signal[prod] == 1 and current_long < pos_lim:
-            price = min(bestbid+1, int(maxbought))
+            if maxbought is None:
+                price = bestbid  + 1
+            else:
+                price = min(bestbid+1, int(maxbought))
             qty = min(pos_lim-current_long, maxmake)
             orders.append(Order(prod, price, qty))
 
         if self.strong_signal[prod] == -1 and current_short > -pos_lim:
-            price = max(bestask-1, int(minsold))
+            if minsold is None:
+                price = bestask - 1
+            else:
+                price = max(bestask-1, int(minsold))
             qty = min(current_short+pos_lim, maxmake)
             orders.append(Order(prod, price, -qty))
 
         return self.check_orders(state, orders, prod)
-
-
-    def order_jam(self, state: TradingState):
-        prod = "JAMS"
-        orders: list[Order] = []
-        order_depth = state.order_depths[prod]
-        pos_lim = self.POS_LIM[prod]
-
-        # free parameters #
-        soft_lim = 180
-        maxtake = 5
-        lookback = 20
-        lookback_strong = 120
-        hits = 1
-        strong_hits = 15
-        # end of parameters #
-
-        # calculate fairprice based on market-making bots
-        fairprice = (min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
-              + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
-
-        self.history[prod].append(fairprice)
-        self.history[prod] = self.history[prod][-(lookback_strong+1):]
-
-        self.find_signal_breakout(prod, lookback, lookback_strong)
-        self.process_signal(prod, hits, strong_hits)
-        
-        # track long and short separately to prevent cancelling out
-        current_short, current_long = 0, 0
-        if prod in state.position:
-            current_pos = state.position[prod]
-            if current_pos > 0:
-                current_long += current_pos
-            else:
-                current_short += current_pos
-        else:
-            current_pos = 0
-            
-        sellorders = sorted(list(order_depth.sell_orders.items()))
-        buyorders = sorted(list(order_depth.buy_orders.items()), reverse=True)
-
-        bestask, ask_amount = sellorders[0][0], sellorders[0][1]
-        bestbid, bid_amount = buyorders[0][0], buyorders[0][1]
-
-        # market taking
-        if self.strong_signal[prod] == 1 and current_long < soft_lim:
-            mybuyvol = min(-ask_amount, soft_lim-current_long)
-            mybuyvol = min(mybuyvol, maxtake)
-            if mybuyvol > 0:
-                orders.append(Order(prod, bestask, mybuyvol))
-
-        elif self.strong_signal[prod] == -1 and current_short > -soft_lim:
-            mysellvol= min(bid_amount, soft_lim+current_short)
-            mysellvol = min(mysellvol, maxtake)
-            if mysellvol > 0:
-                orders.append(Order(prod, bestbid, -mysellvol))
-
-        return self.check_orders(state, orders, prod)
-    
 
     def balance_basket_content(self, state: TradingState):
         content_orders = {}
@@ -1258,6 +1205,139 @@ class Trader:
         return orders
     
 
+    def order_VR(self, state: TradingState):
+        prod = "VOLCANIC_ROCK"
+        orders: list[Order] = []
+        if prod not in state.order_depths:
+            return []
+        order_depth = state.order_depths[prod]
+        if not order_depth.buy_orders or not order_depth.sell_orders:
+            return []
+        pos_lim = self.POS_LIM[prod]
+
+        # free parameters #
+        soft_lim = 100
+        maxtake = 15
+        window = 100
+        mult = 2.
+        mult_strong = 2.5
+        hits = 2
+        strong_hits = 10
+        # end of parameters #
+
+        # calculate fairprice based on market-making bots
+        fairprice = (min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
+              + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
+        
+        self.history[prod].append(fairprice)
+        self.history[prod] = self.history[prod][-window:]
+
+        self.find_signal_zscore(prod, window, mult, mult_strong)
+        self.process_signal(prod, hits, strong_hits)
+
+        # track long and short separately to prevent cancelling out
+        current_short, current_long = 0, 0
+        if prod in state.position:
+            current_pos = state.position[prod]
+            if current_pos > 0:
+                current_long += current_pos
+            else:
+                current_short += current_pos
+        
+        else:
+            current_pos = 0
+            
+        sellorders = sorted(list(order_depth.sell_orders.items()))
+        buyorders = sorted(list(order_depth.buy_orders.items()), reverse=True)
+        bought_prices = list(self.open_buys[prod].keys())
+        sold_prices = list(self.open_sells[prod].keys())
+
+        if len(bought_prices) > 0:
+            maxbought = max(bought_prices)
+            minbought = min(bought_prices)
+        else:
+            maxbought = None
+            minbought = None
+        if len(sold_prices) > 0:
+            minsold = min(sold_prices)
+            maxsold = max(sold_prices)
+        else:
+            minsold = None
+            maxsold = None
+
+        # market taking
+        if self.strong_signal[prod] == 1 and current_long < soft_lim:
+            
+            if minbought is None and minsold is None:
+                condition = True
+            elif minbought is not None:
+                condition = sellorders[0][0] < minbought - 5
+            elif minsold is not None:
+                condition = sellorders[0][0] < minsold - 3
+
+            mybuyvol = min(-sellorders[0][0], soft_lim-current_long)
+            mybuyvol = min(mybuyvol, maxtake)
+            if mybuyvol > 0 and condition:
+                # update minbought to avoid buying higher in the same timestep
+                minbought = sellorders[0][0]
+                orders.append(Order(prod, sellorders[0][0], mybuyvol))
+                current_long += mybuyvol
+        elif current_long < soft_lim and (minbought is not None or minsold is not None):
+            for sellorder in sellorders:
+                ask, ask_amount = sellorder
+                condition = ((minbought is not None and ask < minbought - 8) or
+                            (minsold is not None and ask < minsold - 5))
+                minbought = ask
+                if self.signal[prod] == 1 and condition:
+                    mybuyvol = min(-ask_amount, soft_lim-current_long)
+                    mybuyvol = min(mybuyvol, maxtake)
+                    if mybuyvol > 0:
+                        orders.append(Order(prod, ask, mybuyvol))
+                        current_long += mybuyvol
+                    else:
+                        break
+
+        if (self.strong_signal[prod] == -1 or self.signal[prod] == -1) and current_short > -soft_lim:
+
+            if maxsold is None and maxbought is None:
+                condition = True
+            elif maxsold is not None:
+                condition = buyorders[0][0] > maxsold + 5
+            elif maxbought is not None:
+                condition = buyorders[0][0] > maxbought + 3
+        
+            bid, bid_amount = buyorders[0]
+            mysellvol = min(bid_amount, soft_lim+current_short)
+            mysellvol = min(mysellvol, maxtake)
+            mysellvol *= -1
+            if mysellvol < 0 and condition:
+                # update maxsold to avoid selling lower in the same timestep
+                maxsold = bid
+                orders.append(Order(prod, bid, mysellvol))
+                current_short += mysellvol
+        elif current_short > -soft_lim and (maxsold is not None or maxbought is not None):
+            for buyorder in buyorders:
+                bid, bid_amount = buyorder
+                condition = ((maxbought is not None and bid > maxbought + 5) or
+                            (maxsold is not None and bid > maxsold + 8))
+                if self.signal[prod] == -1 and condition:
+                    mysellvol = min(bid_amount, soft_lim+current_short)
+                    mysellvol = min(mysellvol, maxtake)
+                    mysellvol *= -1
+                    if mysellvol < 0:
+                        # update minbought to avoid buying higher in the same timestep
+                        if maxsold is None:
+                            maxsold = bid
+                        else:
+                            if bid > maxsold:
+                                maxsold = bid
+                        orders.append(Order(prod, bid, mysellvol))
+                        current_short += mysellvol
+
+        return self.check_orders(state, orders, prod)
+
+
+
     def run(self, state: TradingState):
         
         self.timer += 100   
@@ -1309,6 +1389,8 @@ class Trader:
         
         for prod in self.basket_contents[basket]:
             result[prod] = self.check_orders(state, result[prod], prod)
+
+        result["VOLCANIC_ROCK"] = self.order_VR(state)
 
         options = [
             "VOLCANIC_ROCK_VOUCHER_9500",
