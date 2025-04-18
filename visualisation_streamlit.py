@@ -4,10 +4,10 @@ from utils import get_midprice_mm, get_tradehistory, get_mytrades
 
 
 # prices = pd.read_csv("data/round-1/log1-prices.txt", delimiter=';')
-prices = pd.read_csv("data/round-2/prices_round_2_day_1.csv", delimiter=';')
-prices = prices.loc[prices["day"]==0]
-df = prices.loc[prices["product"]=="PICNIC_BASKET2"]
-df.loc[:, "mid_price"] = get_midprice_mm(df)
+# prices = pd.read_csv("data/round-3/backtest.csv", delimiter=';')
+# prices = prices.loc[prices["day"]==2]
+# df = prices.loc[prices["product"]=="PICNIC_BASKET2"]
+# df.loc[:, "mid_price"] = get_midprice_mm(df)
 
 
 def get_trades(infile, prod, mp=None):
@@ -18,14 +18,19 @@ def get_trades(infile, prod, mp=None):
 
     return myhist
 
+# df1 = get_trades("data/round-3/current.log", "PICNIC_BASKET2")
+# df2 = get_trades("data/round-3/current.log", "CROISSANTS")
+# df3 = get_trades("data/round-3/current.log", "JAMS")
+# df4 = get_trades("data/round-3/current.log", "DJEMBES")
+# df = pd.concat((df1, df2, df3)).sort_values("timestamp")
 
-# st.title("RESIN Trade History (OWN)")
-# st.dataframe(get_trades("data/round-1/round1_final.log", "RAINFOREST_RESIN"))
+df = get_trades("data/round-4/current.log", "MAGNIFICENT_MACARONS")
+st.title("PRODUCT Trade History")
+st.dataframe(df)
 
-# st.title("KELP Trade History (OWN)")
-# st.dataframe(get_trades("data/round-1/current.log", "KELP", kelp))
+pnl_current = pd.read_csv("data/round-4/current.csv", sep=";")
+df = pnl_current.loc[pnl_current["product"]=="MAGNIFICENT_MACARONS"][["timestamp", "mid_price", "profit_and_loss"]]
+st.dataframe(df)
 
-st.title("PRODUCT Trade History (OWN)")
-st.dataframe(get_trades("data/round-2/basket.log", "PICNIC_BASKET2", df))
 
 
