@@ -7,7 +7,7 @@ import json
 import math
 import statistics as st
 
-TIME_TO_EXPIRY = 5e6
+TIME_TO_EXPIRY = 4e6
 
 
 class Trader:
@@ -1105,12 +1105,12 @@ class Trader:
             delta += opt_delta
                 
         print(f"unhedged delta: {delta}")
-
-        under_orders, hedge_qty = self.order_volcanic_rock(state, delta)
-        result["VOLCANIC_ROCK"] = under_orders
-        
-        delta_hedged = delta + hedge_qty   # shares carry delta = 1
-        print(f"hedged delta: {delta_hedged}")
+        if False:
+            under_orders, hedge_qty = self.order_volcanic_rock(state, delta)
+            result["VOLCANIC_ROCK"] = under_orders
+            
+            delta_hedged = delta + hedge_qty   # shares carry delta = 1
+            print(f"hedged delta: {delta_hedged}")
 
 
         traderObject = {"open buys": self.open_buys,
