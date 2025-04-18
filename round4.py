@@ -1357,12 +1357,13 @@ class Trader:
         orders = []
         
         # free parameters
-        adverse_lim = 10
-        min_profit = 1
+        adverse_lim = 30
+        final_lim = 10
+        min_profit = 5
         window = 150
         window_small = 20
         threshold = 2.
-        maxsell = min(20, pos+pos_lim)
+        maxsell = min(20, pos+adverse_lim)
         # end of parameters
         
         print("MACARON POS: ", pos)
@@ -1413,7 +1414,7 @@ class Trader:
                     break
         
         if state.timestamp > END_TIME - 5000:
-            if pos < -adverse_lim:
+            if pos < -final_lim:
                 return orders,  conversion
             else:
                 maxsell = 10
