@@ -683,6 +683,57 @@ class Trader:
         return []
 
 
+    def order_jams_djembes(self, state: TradingState):
+        orders = {"JAMS": [], "DJEMBES": []}
+        MAX_ORDER_SIZE = {
+        "JAMS": 5,
+        "DJEMBES": 3
+        }
+
+        for product in orders:
+            if product not in state.order_depths:
+                return orders
+
+            order_depth = state.order_depths[product]
+            if not order_depth.buy_orders or not order_depth.sell_orders:
+                return orders
+
+            best_bid = max(order_depth.buy_orders.keys())
+            best_ask = min(order_depth.sell_orders.keys())
+            mid_price = (min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
+              + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
+            spread = best_ask - best_bid
+            position = state.position.get(product, 0)
+            pos_limit = self.POS_LIM[product]
+
+            if product == "JAMS":
+                # Passive Market Making
+                buy_price = int(mid_price - 1)
+                buy_qty = min(pos_limit - position, MAX_ORDER_SIZE["JAMS"])
+                if buy_qty > 0:
+                    orders[product].append(Order(product, buy_price, buy_qty))
+
+                sell_price = int(mid_price + 1)
+                sell_qty = min(pos_limit + position, MAX_ORDER_SIZE["JAMS"])
+                if sell_qty > 0:
+                    orders[product].append(Order(product, sell_price, -sell_qty))
+
+            elif product == "DJEMBES":
+                # Event-based Sniper Strategy with higher threshold
+                if spread >= 6:
+                    buy_price = best_bid + 1
+                    buy_qty = min(pos_limit - position, MAX_ORDER_SIZE["DJEMBES"])
+                    if buy_qty > 0:
+                        orders[product].append(Order(product, buy_price, buy_qty))
+
+                    sell_price = best_ask - 1
+                    sell_qty = min(pos_limit + position, MAX_ORDER_SIZE["DJEMBES"])
+                    if sell_qty > 0:
+                        orders[product].append(Order(product, sell_price, -sell_qty))
+
+        return orders
+
+
     def order_baskets(self, state: TradingState):
         baskets = ["PICNIC_BASKET1", "PICNIC_BASKET2"]
         pos_lim = [self.POS_LIM[basket] for basket in baskets]
@@ -723,7 +774,8 @@ class Trader:
             bestbid1, bid_vol1 = sorted(state.order_depths[baskets[0]].buy_orders.items(), reverse=True)[0]
             bestask2, ask_vol2 = sorted(state.order_depths[baskets[1]].sell_orders.items())[0]
             ask_vol2 *= -1
-            max_trade = min(max_b2/hedge_ratio, max_b1, bid_vol1/hedge_ratio, ask_vol2)
+            # max_trade = min(max_b2/hedge_ratio, max_b1, bid_vol1/hedge_ratio, ask_vol2)
+            max_trade = min(max_b2, max_b1, bid_vol1, ask_vol2)
             max_trade = int(max_trade)
 
             if max_trade > 0:
@@ -1116,6 +1168,9 @@ class Trader:
         # result["SQUID_INK"] = self.order_squid(state)
         # result["CROISSANTS"] = self.order_croissants(state)
 
+        jams_djembes_orders = self.order_jams_djembes(state)
+        for prod in ["JAMS", "DJEMBES"]:
+            result[prod] = jams_djembes_orders[prod]
 
         # baskets_result = self.order_baskets(state)
         # for basket in baskets_result:
@@ -1130,20 +1185,20 @@ class Trader:
             "VOLCANIC_ROCK_VOUCHER_10500"
         ]
         
-        self.adapt_IV_inference(state)
+        # self.adapt_IV_inference(state)
 
-        delta = 0.0
-        for opt in options:
-            opt_orders, opt_delta = self.order_volcanic_rock_option(state, opt)
-            result[opt]   = opt_orders
-            delta += opt_delta
+        # delta = 0.0
+        # for opt in options:
+        #     opt_orders, opt_delta = self.order_volcanic_rock_option(state, opt)
+        #     result[opt]   = opt_orders
+        #     delta += opt_delta
                 
-        print(f"unhedged delta: {delta}")
-        under_orders, hedge_qty = self.order_volcanic_rock(state, delta)
-        result["VOLCANIC_ROCK"] = under_orders
+        # print(f"unhedged delta: {delta}")
+        # under_orders, hedge_qty = self.order_volcanic_rock(state, delta)
+        # result["VOLCANIC_ROCK"] = under_orders
         
-        delta_hedged = delta + hedge_qty   # shares carry delta = 1
-        print(f"hedged delta: {delta_hedged}")
+        # delta_hedged = delta + hedge_qty   # shares carry delta = 1
+        # print(f"hedged delta: {delta_hedged}")
 
         # mac_orders, conversions = self.order_macarons(state)
         # result["MAGNIFICENT_MACARONS"] = mac_orders
@@ -1165,5 +1220,5 @@ class Trader:
         
         # traderData = jsonpickle.encode(traderObject)
 
-        return result, conversions, ""      # CHANGE THISS
+        return result, conversions, ""     # CHANGE THISS
 
