@@ -7,11 +7,9 @@ import json
 import math
 import statistics as st
 
-### CHANGE TO OLIVIA!!
+
 SIGNAL_PERSON = "Olivia"
-
-
-TIME_TO_EXPIRY = 4e6
+TIME_TO_EXPIRY = 3e6
 
 
 def black_scholes_call_price(S, K, T, sigma,r):
@@ -60,7 +58,6 @@ class Trader:
         self.timer = 0
         self.open_buys = {prod: {} for prod in self.prods}
         self.open_sells = {prod: {} for prod in self.prods}
-        # self.recorded_time = {prod: -1 for prod in self.prods}    # last recorded time of own_trades
 
         # historical data and past signals for trading signals; store global extremum for assets relying on Olivia
         self.global_min = {prod: None for prod in self.prods}
@@ -69,11 +66,7 @@ class Trader:
         self.sunlight = []
         self.previous_sunchange = None
         self.macaron_panic = False
-        self.last_sold_macaron = None
-        self.upper = {prod: 0 for prod in self.prods}
-        self.lower = {prod: 0 for prod in self.prods}
-        self.signal = {prod: 0 for prod in self.prods}
-        self.strong_signal = {prod: 0 for prod in self.prods}
+        self.last_sold_time = {prod: None for prod in self.prods}
 
         # paremeters for OPTIONS
         self.linreg = {"a": 0.150195656,
@@ -119,6 +112,8 @@ class Trader:
         for prod in state.own_trades:
             trades = state.own_trades[prod]
             trades = [trade for trade in trades if trade.timestamp == state.timestamp - 100]
+            if len(trades) > 0:
+                self.last_sold_time[prod] = state.timestamp - 100
             for trade in trades:
                 remaining_quantity = trade.quantity
                 if trade.buyer == "SUBMISSION":
@@ -181,7 +176,7 @@ class Trader:
                 state.position.get("MAGNIFICENT_MACARONS", 0):
                     print("BEEP! Open positions incorrectly tracked!", mac)
             if len(self.open_sells[mac]) > 0:
-                self.last_sold_macaron = state.own_trades[mac][0].timestamp
+                self.last_sold_time[mac] = state.own_trades[mac][0].timestamp
         return None
 
 
@@ -208,141 +203,6 @@ class Trader:
         else:
             return orders
 
-
-    def find_signal_zscore(self, prod, window, mult, mult_strong):
-        
-        """
-        Find trading signals using mean-reversion by tracking Z scores. 
-        Hits: number of consecutive hits on the upper band needed to constitute a signal
-        Strong hits: number of consecutive signals to constitute a strong signal
-        """
-
-        history = self.history[prod]
-
-        self.strong_signal[prod] = 0
-
-        if len(history) < window:
-            return None
-
-        # Mean reversion strategy
-        if len(history) >= window:
-            sma = np.mean(np.array(history[-window:]))
-            std = np.std(np.array(history[-window:]), ddof=1)
-            if std > 0:
-                z = (history[-1] - sma) / std
-            else:
-                return None
-
-        if np.abs(z) >= mult_strong:
-            if z > 0:
-                self.strong_signal[prod] = -1
-            else:
-                self.strong_signal[prod] = 1
-            return None
-
-        if z < -mult:
-            self.lower[prod] += 1
-            self.upper[prod] = 0
-        elif z > mult:
-            self.lower[prod] = 0
-            self.upper[prod] += 1
-        else:
-            self.upper[prod] = self.lower[prod] = 0
-
-        return None
-
-
-    def find_signal_momentum(self, prod, lookback, threshold, strong_threshold):
-
-        self.strong_signal[prod] = 0
-
-        if len(self.history[prod]) < lookback + 1:
-            return None
-
-        returns = (self.history[prod][-1] - self.history[prod][-(1+lookback)]) / self.history[prod][-1]
-
-        if returns < -strong_threshold:
-            self.strong_signal[prod] = 1
-            self.upper[prod] = self.lower[prod] = self.signal[prod] = 0
-
-        elif returns > strong_threshold:
-            self.strong_signal[prod] = -1
-            self.upper[prod] = self.lower[prod] = self.signal[prod] = 0
-        
-        if np.abs(self.strong_signal[prod]) == 1:
-            return None
-
-        if returns < -threshold:
-            self.upper[prod] = 0
-            self.lower[prod] += 1
-        elif returns > threshold:
-            self.upper[prod] += 1
-            self.lower[prod] = 0
-        else:
-            self.upper[prod] = self.lower[prod] = 0
-        return None
-
-    
-    def find_signal_breakout(self, prod, lookback, lookback_strong, reset=False):
-        self.strong_signal[prod] = 0
-
-        if len(self.history[prod]) < lookback + 1:
-            return None
-        
-        self.history[prod] = self.history[prod][-(lookback_strong+1):]
-
-        if len(self.history[prod]) == lookback_strong + 1:
-            high = np.max(self.history[prod][:-1])
-            low = np.min(self.history[prod][:-1])
-            if self.history[prod][-1] > high:
-                self.strong_signal[prod] = -1
-                return None
-            if self.history[prod][-1] < low:
-                self.strong_signal[prod] = 1
-                return None
-        
-        high = np.max(self.history[prod][-(lookback+1):-1])
-        low = np.min(self.history[prod][-(lookback+1):-1])
-
-        if self.history[prod][-1] > high:
-            self.upper[prod] += 1
-            self.lower[prod] = 0
-        elif self.history[prod][-1] < low:
-            self.lower[prod] += 1
-            self.upper[prod] = 0
-        else:
-            if reset:
-                self.upper[prod] = self.lower[prod] = 0
-        return None
-    
-
-    def process_signal(self, prod, hits, strong_hits):
-        if np.abs(self.strong_signal[prod]) == 1:
-            return None
-        
-        if self.upper[prod] >= hits:      # sell signal
-            if self.signal[prod] > 0:
-                self.signal[prod] = -1
-            else:
-                self.signal[prod] -= 1
-            self.upper[prod] = self.lower[prod] = 0     # reset counter
-
-        elif self.lower[prod] >= hits:        # buy signal
-            if self.signal[prod] > 0:
-                self.signal[prod] += 1
-            else:
-                self.signal[prod] = 1
-            self.upper[prod] = self.lower[prod] = 0     # reset counter
-
-        if self.signal[prod] == -strong_hits:      # strong sell; reset signal and counter
-            self.strong_signal[prod] = -1
-            self.signal[prod] = self.lower[prod] = self.upper[prod] = 0
-            
-        elif self.signal[prod] == strong_hits:        # strong buy; reset signal and counter
-            self.strong_signal[prod] = 1
-            self.signal[prod] = self.lower[prod] = self.upper[prod] = 0
-        return None
-    
 
     def order_resin(self, state: TradingState):
         orders: list[Order] = []
@@ -683,67 +543,16 @@ class Trader:
         return []
 
 
-    def order_jams_djembes(self, state: TradingState):
-        orders = {"JAMS": [], "DJEMBES": []}
-        MAX_ORDER_SIZE = {
-        "JAMS": 5,
-        "DJEMBES": 3
-        }
-
-        for product in orders:
-            if product not in state.order_depths:
-                return orders
-
-            order_depth = state.order_depths[product]
-            if not order_depth.buy_orders or not order_depth.sell_orders:
-                return orders
-
-            best_bid = max(order_depth.buy_orders.keys())
-            best_ask = min(order_depth.sell_orders.keys())
-            mid_price = (min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
-              + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
-            spread = best_ask - best_bid
-            position = state.position.get(product, 0)
-            pos_limit = self.POS_LIM[product]
-
-            if product == "JAMS":
-                # Passive Market Making
-                buy_price = int(mid_price - 1)
-                buy_qty = min(pos_limit - position, MAX_ORDER_SIZE["JAMS"])
-                if buy_qty > 0:
-                    orders[product].append(Order(product, buy_price, buy_qty))
-
-                sell_price = int(mid_price + 1)
-                sell_qty = min(pos_limit + position, MAX_ORDER_SIZE["JAMS"])
-                if sell_qty > 0:
-                    orders[product].append(Order(product, sell_price, -sell_qty))
-
-            elif product == "DJEMBES":
-                # Event-based Sniper Strategy with higher threshold
-                if spread >= 6:
-                    buy_price = best_bid + 1
-                    buy_qty = min(pos_limit - position, MAX_ORDER_SIZE["DJEMBES"])
-                    if buy_qty > 0:
-                        orders[product].append(Order(product, buy_price, buy_qty))
-
-                    sell_price = best_ask - 1
-                    sell_qty = min(pos_limit + position, MAX_ORDER_SIZE["DJEMBES"])
-                    if sell_qty > 0:
-                        orders[product].append(Order(product, sell_price, -sell_qty))
-
-        return orders
-
-
     def order_baskets(self, state: TradingState):
         baskets = ["PICNIC_BASKET1", "PICNIC_BASKET2"]
         pos_lim = [self.POS_LIM[basket] for basket in baskets]
-        adverse_lim = [60, 30]
+        adverse_lim = [self.POS_LIM[basket] for basket in baskets]
         orders = {basket: [] for basket in baskets}
         hedge_ratio = 2.16
         sgn = [1, -hedge_ratio]
         window = 1000
         threshold = 3.
-        exit = 0.5
+        clear_threshold = 0.003
         pos = [state.position.get(baskets[i], 0) for i in range(2)]
 
         if baskets[0] not in state.order_depths or baskets[1] not in state.order_depths:
@@ -763,55 +572,97 @@ class Trader:
             return orders
             
         hist = self.history[baskets[0]]
-        ### CHANGE MEAN LATER
-        mean = -6629.809185333337
-        std = np.std(hist[-window:])
+        mean = np.mean(hist[-window:])
+        std = np.std(hist[-window:], ddof=1)
         z = (hist[-1] - mean) / std if std != 0 else 0
 
         if z > threshold and pos[0] >= -adverse_lim[0] and pos[1] <= adverse_lim[1]:       # sell PB1; buy PB2
-            max_b2 = pos_lim[1] - pos[1]
-            max_b1 = pos_lim[0] + pos[0]
-            bestbid1, bid_vol1 = sorted(state.order_depths[baskets[0]].buy_orders.items(), reverse=True)[0]
-            bestask2, ask_vol2 = sorted(state.order_depths[baskets[1]].sell_orders.items())[0]
-            ask_vol2 *= -1
-            # max_trade = min(max_b2/hedge_ratio, max_b1, bid_vol1/hedge_ratio, ask_vol2)
-            max_trade = min(max_b2, max_b1, bid_vol1, ask_vol2)
-            max_trade = int(max_trade)
+            bids = sorted(state.order_depths[baskets[0]].buy_orders.items(), reverse=True)
+            asks = sorted(state.order_depths[baskets[1]].sell_orders.items())
 
+            max_b2 = adverse_lim[1] - pos[1]
+            max_b1 = adverse_lim[0] + pos[0]
+            bestbid1, bid_vol1 = bids[0]
+            bestask2, ask_vol2 = asks[0]
+            ask_vol2 *= -1
+            max_trade = min(max_b2/hedge_ratio, max_b1, bid_vol1/hedge_ratio, ask_vol2)
+            max_trade = int(max_trade)
             if max_trade > 0:
                 orders[baskets[0]].append(Order(baskets[0], bestbid1, -max_trade))
                 orders[baskets[1]].append(Order(baskets[1], bestask2, int(hedge_ratio * max_trade)))
+            
+            if len(bids) > 1 and len(asks) > 1:
+                max_b2 = adverse_lim[1] - (pos[1] + int(hedge_ratio * max_trade))
+                max_b1 = adverse_lim[0] + pos[0] - max_trade
+                bestbid1, bid_vol1 = bids[1]
+                bestask2, ask_vol2 = asks[1]
+                ask_vol2 *= -1
+                max_trade = min(max_b2/hedge_ratio, max_b1, bid_vol1/hedge_ratio, ask_vol2)
+                max_trade = int(max_trade)
+                if max_trade > 0:
+                    orders[baskets[0]].append(Order(baskets[0], bestbid1, -max_trade))
+                    orders[baskets[1]].append(Order(baskets[1], bestask2, int(hedge_ratio * max_trade)))
+
             return orders
         
         if z < -threshold and pos[0] <= adverse_lim[0] and pos[1] >= -adverse_lim[1]:       # buy PB1; sell PB2
-            max_b2 = pos_lim[1] + pos[1]
-            max_b1 = pos_lim[0] - pos[0]
-            bestbid2, bid_vol2 = sorted(state.order_depths[baskets[1]].buy_orders.items(), reverse=True)[0]
-            bestask1, ask_vol1 = sorted(state.order_depths[baskets[0]].sell_orders.items())[0]
+            bids = sorted(state.order_depths[baskets[1]].buy_orders.items(), reverse=True)
+            asks = sorted(state.order_depths[baskets[0]].sell_orders.items())
+
+            max_b2 = adverse_lim[1] + pos[1]
+            max_b1 = adverse_lim[0] - pos[0]
+            bestbid2, bid_vol2 = bids[0]
+            bestask1, ask_vol1 = asks[0]
             ask_vol1 *= -1
             max_trade = min(max_b2/hedge_ratio, max_b1, bid_vol2/hedge_ratio, ask_vol1)
             max_trade = int(max_trade)
-
             if max_trade > 0:
                 orders[baskets[0]].append(Order(baskets[0], bestask1, max_trade))
                 orders[baskets[1]].append(Order(baskets[1], bestbid2, -int(hedge_ratio * max_trade)))
+
+            if len(asks) > 1 and len(bids) > 1:
+                max_b1 = adverse_lim[0] - (pos[0] + max_trade)
+                max_b2 = adverse_lim[1] + pos[1] -int(hedge_ratio * max_trade)
+                bestbid2, bid_vol2 = bids[1]
+                bestask1, ask_vol1 = asks[1]
+                ask_vol1 *= -1
+                max_trade = min(max_b2/hedge_ratio, max_b1, bid_vol2/hedge_ratio, ask_vol1)
+                max_trade = int(max_trade)
+                if max_trade > 0:
+                    orders[baskets[0]].append(Order(baskets[0], bestask1, max_trade))
+                    orders[baskets[1]].append(Order(baskets[1], bestbid2, -int(hedge_ratio * max_trade)))
+
             return orders
         
-        if z > -exit and z < exit:      # exit position 
-            bestbid2, bid_vol2 = sorted(state.order_depths[baskets[1]].buy_orders.items(), reverse=True)[0]
-            bestask1, ask_vol1 = sorted(state.order_depths[baskets[0]].sell_orders.items())[0]
-            if  pos[0] < 0 and pos[1] > 0:        # buy PB1; sell PB2
-                max_b2 = pos[1]
-                max_b1 = -pos[0]
+        # exit position when returns threshold fulfilled
+        bestbid2, bid_vol2 = sorted(state.order_depths[baskets[1]].buy_orders.items(), reverse=True)[0]
+        bestbid1, bid_vol1 = sorted(state.order_depths[baskets[0]].buy_orders.items(), reverse=True)[0]
+        bestask1, ask_vol1 = sorted(state.order_depths[baskets[0]].sell_orders.items())[0]
+        bestask2, ask_vol2 = sorted(state.order_depths[baskets[1]].sell_orders.items())[0]
+        if  pos[0] < 0 and pos[1] > 0:        # buy PB1; sell PB2
+            max_sold = max(self.open_sells[baskets[0]].keys())
+            min_bought = min(self.open_buys[baskets[1]].keys())
+            if (max_sold - bestask1) / bestask1 >= clear_threshold and (bestbid2 - min_bought) / min_bought >= clear_threshold:
                 orders[baskets[0]].append(Order(baskets[0], bestask1, -pos[0]))
                 orders[baskets[1]].append(Order(baskets[1], bestbid2, -pos[1]))
                 return orders
-            if  pos[0] > 0 and pos[1] < 0:        # sell PB1; buy PB2
-                max_b2 = -pos[1]
-                max_b1 = pos[0]
-                orders[baskets[0]].append(Order(baskets[0], bestask1, -pos[0]))
-                orders[baskets[1]].append(Order(baskets[1], bestbid2, -pos[1]))
+        if  pos[0] > 0 and pos[1] < 0:        # sell PB1; buy PB2
+            max_sold = max(self.open_sells[baskets[1]].keys())
+            min_bought = min(self.open_buys[baskets[0]].keys())
+            if (max_sold - bestask2) / bestask2 > clear_threshold and (bestbid1 - min_bought) / min_bought > clear_threshold:
+                orders[baskets[0]].append(Order(baskets[0], bestbid1, -pos[0]))
+                orders[baskets[1]].append(Order(baskets[1], bestask2, -pos[1]))
                 return orders
+        
+        if self.last_sold_time[baskets[0]] is not None and self.last_sold_time[baskets[1]] is not None:
+            if state.timestamp - self.last_sold_time[baskets[0]] > 150000:       # exit the position if held for too long
+                print("BEEP! Overstayed your welcome!")
+                if pos[0] > 0 and pos[1] < 0:
+                    orders[baskets[0]].append(Order(baskets[0], bestbid1, -pos[0]))
+                    orders[baskets[1]].append(Order(baskets[1], bestask2, -pos[1]))
+                elif pos[0] < 0 and pos[1] > 0:
+                    orders[baskets[0]].append(Order(baskets[0], bestask1, -pos[0]))
+                    orders[baskets[1]].append(Order(baskets[1], bestbid2, -pos[1]))
             
         return orders
 
@@ -890,11 +741,13 @@ class Trader:
         """
         orders: list[Order] = []
         if option not in state.order_depths:
-            return orders
+            return orders, 0
         order_depth = state.order_depths[option]
         pos_lim = self.POS_LIM[option]
 
-        # Get the underlying mid-price for VOLCANIC_ROCK.
+        maxqty = 200    # CHANGE THIS
+
+        # Get the underlying mid-price for VOLCANIC_ROCK
         underlying = "VOLCANIC_ROCK"
         if underlying in state.order_depths and state.order_depths[underlying].buy_orders and state.order_depths[underlying].sell_orders:
             best_bid_und = max(
@@ -903,13 +756,13 @@ class Trader:
                 state.order_depths[underlying].sell_orders.keys())
             S = (best_bid_und + best_ask_und) / 2
         else:
-            return orders
+            return orders, 0
 
         # Extract the strike price from the option name.
         try:
             strike = float(option.split("_")[-1])
         except Exception:
-            return orders
+            return orders, 0
 
         remaining_time = TIME_TO_EXPIRY - state.timestamp
         T = remaining_time / 365e6
@@ -919,7 +772,7 @@ class Trader:
             S, strike, T, sigma_est, r)
         opt_delta = black_scholes_call_delta(S, strike, T, sigma_est, r)
 
-        print(f"theoretical price: {theoretical_price}")
+        # print(f"theoretical price: {theoretical_price}")
         # print(f"sigma_est: {sigma_est}")
         # Determine the current market mid-price for the option.
         if order_depth.buy_orders and order_depth.sell_orders:
@@ -929,7 +782,7 @@ class Trader:
         else:
             market_mid = 0
 
-        print(f"Market mid: {market_mid}")
+        # print(f"Market mid: {market_mid}")
         current_pos = state.position.get(option, 0)
         # sd = standard deviation of estimate to actual
         if strike == 9500:
@@ -944,15 +797,16 @@ class Trader:
             sd = 0.2947
         else:
             sd = 0.4
-
-        print(f"Current pos: {current_pos}")
+        
+        if current_pos > 0:
+            print(f"Current pos: {current_pos}")
         buy_limit = theoretical_price - sd*0.4*math.exp(current_pos/200)
         sell_limit = theoretical_price + sd*0.4*math.exp(-current_pos/200)
 
         # how many we *may* add
         desired_buy = max(0,  self.POS_LIM[option] - current_pos)
         # how many we *may* remove
-        desired_sell = max(0, -self.POS_LIM[option] - current_pos)
+        desired_sell = max(0, self.POS_LIM[option] + current_pos)
 
         # -------- cum volumes already resting in the book ---------------
         buyable = sum(-v for p, v in order_depth.sell_orders.items()
@@ -960,20 +814,19 @@ class Trader:
         sellable = sum(v for p, v in order_depth.buy_orders.items()
                        if p >= sell_limit)                    # bids ≥ limit
 
-        qty_buy = min(buyable,  desired_buy)
-        qty_sell = min(sellable, desired_sell)
+        qty_buy = max(0, min(buyable,  desired_buy, maxqty))     
+        qty_sell = max(0, min(sellable, desired_sell, maxqty))
 
         orders = []
-        if qty_buy:
-            orders.append(Order(option, round(buy_limit),  desired_buy))
-        if qty_sell:
-            orders.append(Order(option, round(sell_limit), -desired_sell))
+        if qty_buy > 0:
+            orders.append(Order(option, round(buy_limit),  qty_buy))
+        if qty_sell > 0:
+            orders.append(Order(option, round(sell_limit), -qty_sell))
         # ----------------------------------------------------------------
 
         # expected instant position after those aggressively priced lots
         new_pos = current_pos + qty_buy - qty_sell
         delta_exposure = new_pos * opt_delta
-
         return orders, delta_exposure
 
 
@@ -982,15 +835,25 @@ class Trader:
         prod   = "VOLCANIC_ROCK"
         pos_lim = self.POS_LIM[prod]
         current_pos = state.position.get(prod, 0)
-    
-        target_qty = round(-hedge_delta) - current_pos
-        target_qty = max(-pos_lim - current_pos,
-                     min(pos_lim - current_pos, target_qty))   # obey limit
-        if target_qty == 0:
+
+        if prod not in state.order_depths:
             return [], 0
+        order_depth = state.order_depths[prod]
+
+        bestbid = sorted(state.order_depths[prod].buy_orders.items(), reverse=True)[0][0]
+        bestask = sorted(state.order_depths[prod].sell_orders.items())[0][0]
     
-        orders = [Order(prod, 1_000_000, target_qty)]          # always at 1e6
-        return orders, target_qty
+        target_qty = round(-hedge_delta/2)
+        
+        if target_qty > 0:      # buy rocks
+            qty = min(target_qty, pos_lim-current_pos)
+            return [Order(prod, bestask, qty)], qty
+
+        if target_qty <= 0:     # sell rocks
+            qty = min(-target_qty, pos_lim+current_pos)
+            return [Order(prod, bestbid, -qty)], -qty
+
+        return 0, []
 
 
     def order_macarons(self, state: TradingState):
@@ -1115,8 +978,8 @@ class Trader:
                 volume -= conv_vol
                 if conversion >= conv_lim and volume > 0 and sold_price - bestask > min_profit:
                     orders.append(Order(prod, bestask, volume))
-        elif self.last_sold_macaron is not None:
-            if state.timestamp - self.last_sold_macaron > 100000:       # exit the position if held for too long
+        elif self.last_sold_time[prod] is not None:
+            if state.timestamp - self.last_sold_time[prod] > 100000:       # exit the position if held for too long
                 print("BEEP! Overstayed your welcome!")
                 min_profit = -5
                 sorted_sold = sorted(self.open_sells[prod].items(), reverse=True)
@@ -1139,42 +1002,34 @@ class Trader:
         self.timer += 100   
         conversions = 0
 
-        # if self.timer != state.timestamp:
-        #     if state.traderData != None and state.traderData != "":
-        #         traderObject = jsonpickle.decode(state.traderData)
-        #         self.open_buys = {item: {float(k): v for k, v in inner.items()}
-        #                         for item, inner in traderObject["open buys"].items()}
-        #         self.open_sells = {item: {float(k): v for k, v in inner.items()}
-        #                         for item, inner in traderObject["open sells"].items()}
-        #         self.history = traderObject["history"]
-        #         self.sunlight = traderObject["sunlight"]
-        #         self.previous_sunchange = traderObject["sun change"]
-        #         self.macaron_panic = traderObject["panic"]
-        #         self.last_sold_macaron = traderObject["last sold macaron"]
-        #         self.upper = traderObject["upper"]
-        #         self.lower = traderObject["lower"]
-        #         self.signal = traderObject["signal"]
-        #         self.strong_signal = traderObject["strong signal"]
-        #         self.linreg = traderObject["linreg"]
-        #         self.global_min = traderObject["global min"]
-        #         self.global_max = traderObject["global max"]
+        if self.timer != state.timestamp:
+            if state.traderData != None and state.traderData != "":
+                traderObject = jsonpickle.decode(state.traderData)
+                self.open_buys = {item: {float(k): v for k, v in inner.items()}
+                                for item, inner in traderObject["open buys"].items()}
+                self.open_sells = {item: {float(k): v for k, v in inner.items()}
+                                for item, inner in traderObject["open sells"].items()}
+                self.history = traderObject["history"]
+                self.sunlight = traderObject["sunlight"]
+                self.previous_sunchange = traderObject["sun change"]
+                self.macaron_panic = traderObject["panic"]
+                self.last_sold_time = traderObject["last sold time"]
+                self.linreg = traderObject["linreg"]
+                self.global_min = traderObject["global min"]
+                self.global_max = traderObject["global max"]
         
         self.update_open_pos(state)
 
         result = {}
 
-        # result["RAINFOREST_RESIN"] = self.order_resin(state)
-        # result["KELP"] = self.order_kelp(state)
-        # result["SQUID_INK"] = self.order_squid(state)
-        # result["CROISSANTS"] = self.order_croissants(state)
+        result["RAINFOREST_RESIN"] = self.order_resin(state)
+        result["KELP"] = self.order_kelp(state)
+        result["SQUID_INK"] = self.order_squid(state)
+        result["CROISSANTS"] = self.order_croissants(state)
 
-        jams_djembes_orders = self.order_jams_djembes(state)
-        for prod in ["JAMS", "DJEMBES"]:
-            result[prod] = jams_djembes_orders[prod]
-
-        # baskets_result = self.order_baskets(state)
-        # for basket in baskets_result:
-        #     result[basket] = baskets_result[basket]
+        baskets_result = self.order_baskets(state)
+        for basket in baskets_result:
+            result[basket] = baskets_result[basket]
 
             
         options = [
@@ -1185,40 +1040,37 @@ class Trader:
             "VOLCANIC_ROCK_VOUCHER_10500"
         ]
         
-        # self.adapt_IV_inference(state)
+        self.adapt_IV_inference(state)
 
-        # delta = 0.0
-        # for opt in options:
-        #     opt_orders, opt_delta = self.order_volcanic_rock_option(state, opt)
-        #     result[opt]   = opt_orders
-        #     delta += opt_delta
+        delta = 0.0
+        for opt in options:
+            opt_orders, opt_delta = self.order_volcanic_rock_option(state, opt)
+            result[opt]   = opt_orders
+            delta += opt_delta
                 
-        # print(f"unhedged delta: {delta}")
-        # under_orders, hedge_qty = self.order_volcanic_rock(state, delta)
-        # result["VOLCANIC_ROCK"] = under_orders
+        print(f"unhedged delta: {delta}")
+        if delta > 0:
+            print("VOILA!")
+        under_orders, hedge_qty = self.order_volcanic_rock(state, delta)
+        result["VOLCANIC_ROCK"] = under_orders
         
-        # delta_hedged = delta + hedge_qty   # shares carry delta = 1
-        # print(f"hedged delta: {delta_hedged}")
+        delta_hedged = delta + hedge_qty   # shares carry delta = 1
+        print(f"hedged delta: {delta_hedged}")
 
-        # mac_orders, conversions = self.order_macarons(state)
-        # result["MAGNIFICENT_MACARONS"] = mac_orders
+        mac_orders, conversions = self.order_macarons(state)
+        result["MAGNIFICENT_MACARONS"] = mac_orders
 
-        # traderObject = {"open buys": self.open_buys, 
-        #                 "open sells": self.open_sells, 
-        #                 "history": self.history,
-        #                 "sunlight": self.sunlight,
-        #                 "sun change": self.previous_sunchange,
-        #                 "panic": self.macaron_panic,
-        #                 "last sold macaron": self.last_sold_macaron,
-        #                 "upper": self.upper,
-        #                 "lower": self.lower,
-        #                 "signal": self.signal,
-        #                 "strong signal": self.strong_signal,
-        #                 "linreg": self.linreg,
-        #                 "global min": self.global_min,
-        #                 "global max": self.global_max}
-        
-        # traderData = jsonpickle.encode(traderObject)
+        traderObject = {"open buys": self.open_buys, 
+                        "open sells": self.open_sells, 
+                        "history": self.history,
+                        "sunlight": self.sunlight,
+                        "sun change": self.previous_sunchange,
+                        "panic": self.macaron_panic,
+                        "last sold time": self.last_sold_time,
+                        "linreg": self.linreg,
+                        "global min": self.global_min,
+                        "global max": self.global_max}
 
-        return result, conversions, ""     # CHANGE THISS
+        traderData = jsonpickle.encode(traderObject)
 
+        return result, conversions, traderData
