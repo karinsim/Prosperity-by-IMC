@@ -1348,49 +1348,110 @@ class Trader:
 
     def order_macarons(self, state: TradingState):
         # try to import from Pristine at a lower price
-        # it seems like short-selling is heavily rewarded
         prod = "MAGNIFICENT_MACARONS"
-        if prod not in state.order_depths:
-            return [], 0
+        END_TIME = 99900
         conv_lim = 10
         conversion = 0
         pos_lim = self.POS_LIM[prod]
         pos = state.position.get(prod, 0)
         orders = []
+        
+        # free parameters
+        adverse_lim = 30
+        final_lim = 10
+        min_profit = 5
+        window = 150
+        window_small = 20
+        threshold = 2.
+        maxsell = min(20, pos+adverse_lim)
+        # end of parameters
+        
+        print("MACARON POS: ", pos)
+        
+        obs = state.observations.conversionObservations[prod]
+        implied_ask = obs.askPrice + obs.importTariff + obs.transportFees
+        
+        if pos < 0:
+            remaining_items = []
+            sorted_sold = sorted(self.open_sells[prod].items(), reverse=True)
+            
+            for idx, (price, volume) in enumerate(sorted_sold):
+                if price - implied_ask < min_profit or conversion >= conv_lim:
+                    remaining_items.extend(sorted_sold[idx:]) 
+                    break
+        
+                conv_vol = max(min(volume, conv_lim-conversion), 0)
+                conversion += conv_vol
+                remaining_vol = volume - conv_vol
+                if remaining_vol > 0:
+                    remaining_items.append((price, remaining_vol))
+        
+            print("conversion request:", conversion)
+        
+            if prod not in state.order_depths:
+                return orders, conversion
+        
+            order_depth = state.order_depths[prod]
+            sorted_asks = sorted([(p, -v) for p, v in order_depth.sell_orders.items()])
+        
+            sold_idx, ask_idx = 0, 0
+            while sold_idx < len(remaining_items) and ask_idx < len(sorted_asks):
+                sell_price, sell_vol = remaining_items[sold_idx]
+                ask_price, ask_vol = sorted_asks[ask_idx]
+                match_vol = min(sell_vol, ask_vol)
+                profit = sell_price - ask_price
+                if profit >= min_profit:
+                    orders.append(Order(prod, ask_price, match_vol))
+                    sell_vol -= match_vol
+                    ask_vol -= match_vol
+                    remaining_items[sold_idx] = (sell_price, sell_vol)
+                    sorted_asks[ask_idx] = (ask_price, ask_vol)
+                    if sell_vol == 0:
+                        sold_idx += 1
+                    if ask_vol == 0:
+                        ask_idx += 1
+                else:
+                    break
+        
+        if state.timestamp > END_TIME - 5000:
+            if pos < -final_lim:
+                return orders,  conversion
+            else:
+                maxsell = 10
+        
+        if prod not in state.order_depths:
+                return orders, conversion
+        
         order_depth = state.order_depths[prod]
-        # bestbid = max(order_depth.buy_orders.keys())
+        bestbid = max(order_depth.buy_orders.keys())
         bestask = min(order_depth.sell_orders.keys())
-        min_profit = 2
-
         fairprice = (min(order_depth.sell_orders, key=order_depth.sell_orders.get) 
               + max(order_depth.buy_orders, key=order_depth.buy_orders.get)) / 2
         self.history[prod].append(fairprice)
-        self.history[prod] = self.history[prod][-10:]
+        self.history[prod] = self.history[prod][-window:]
 
-        self.find_signal_zscore(prod, 10, 2.5, 5.)
-        self.process_signal(prod, 1, 50)
-
-        # if self.signal[prod] <= -1 or self.strong_signal[prod] == -1:     # mean reversion
-        if self.signal[prod] >= 1 or self.strong_signal[prod] == 1:     # bollinger band
-            maxsell = pos + pos_lim
-            soldqty = 0
-            prices = [bestask-2, bestask-1]
-            for price in prices:
-                if soldqty < maxsell:
-                    orders.append(Order(prod, price, -min(maxsell // len(prices), maxsell-soldqty)))
-                    soldqty += maxsell // len(prices)
-
-        obs = state.observations.conversionObservations[prod]
-        implied_ask = obs.askPrice + obs.importTariff + obs.transportFees
-
-        if pos < 0:
-            sorted_items = sorted(self.open_sells[prod].items(), reverse=True)
-            for price, volume in sorted_items:
-                if price - implied_ask < min_profit:
-                    break
-                if conversion < conv_lim:
-                    conversion += max(min(volume, conv_lim-conversion), 0)
+        if len(self.history[prod]) < window_small:
+            return orders, conversion
+        if len(self.history[prod]) > window_small and len(self.history[prod]) < window:
+            mean = np.mean(self.history[prod])
+            std = np.std(self.history[prod], ddof=1)
+            z = (self.history[prod][-1] - mean) / std if std != 0 else 0
+            if z > 2.:
+                orders.append(Order(prod, bestask-1, -min(20, pos_lim+pos)))
         
+        mean = np.mean(self.history[prod])
+        std = np.std(self.history[prod], ddof=1)
+        z = (self.history[prod][-1] - mean) / std if std != 0 else 0
+        if z < -threshold:
+            return orders, conversion
+            
+        soldqty = 0
+        prices = [bestask-2, bestask-1]
+        for price in prices:
+            if soldqty < maxsell:
+                orders.append(Order(prod, price, -min(maxsell // len(prices), maxsell-soldqty)))
+                soldqty += maxsell // len(prices)
+                
         return orders, conversion
     
 
@@ -1400,7 +1461,7 @@ class Trader:
         conversions = 0
 
         ### UPDATE WITH DAY N DATA ###
-        linreg = {"KELP":  (15.11018100844262, 9.768257499187243e-06, 2057.517022160843)}
+        linreg = {"KELP":  (13.981021433414554, 6.272060787714549e-06, 2052.659937632851)}
 
         if self.timer != state.timestamp:
             if state.traderData != None and state.traderData != "":
@@ -1458,10 +1519,6 @@ class Trader:
         # ]
         # for option in options:
         #     result[option] = self.order_volcanic_rock_option(state, option)
-
-        mac = "MAGNIFICENT_MACARONS"
-        if mac in state.position:
-            print("position: ", state.position["MAGNIFICENT_MACARONS"])
 
         mac_orders, conversions = self.order_macarons(state)
         result["MAGNIFICENT_MACARONS"] = mac_orders
