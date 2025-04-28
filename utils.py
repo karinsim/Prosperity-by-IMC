@@ -4,6 +4,31 @@ from datamodel import Trade
 import re
 
 
+def get_prices_log(infile, outfile):
+    # extract price & pnl data from (end-of-round) log files
+
+    fp = open(infile)
+    start = False
+    start_signal = "Activities log"
+    end_signal = "Trade History"
+    
+    with open(outfile, "w") as f:
+        for line in fp:
+
+            if not start:
+                if start_signal in line:
+                    start = True
+
+            elif start:
+                if end_signal in line:
+                    break
+                
+                f.write(line)
+                
+    f.close()
+    fp.close()
+
+
 def get_tradehistory(file):
     # extract trade history from raw log output
     fp = open(file)
