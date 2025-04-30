@@ -1,16 +1,15 @@
 # Prosperity 3 by IMC: Team Island Boy Island
 
-The IMC Prosperity3 challenge is a 15-day trading competition on a virtual market environment. Participants are tasked with building and optimising trading algorithms by backtesting their strategies on provided historical data. The challenge provides a simulated environment where participants can test and evaluate their models against others.
+The IMC Prosperity3 challenge is a 15-day trading competition in a virtual market environment. Participants are tasked with building and optimising trading algorithms by backtesting their strategies on provided historical data. The challenge provides a simulated environment where participants can test and evaluate their models against others.
 
 There is also a manual trading component to the challenge, ... (A few words on this)
 
 ## The team and their contributions
+[**Karin Nakanishi**](https://www.linkedin.com/in/karin-nakanishi/): Developed the utility functions and the structure of `Trader` class during the Tutorial round; analysed trading signals and developed strategies for all assets except for the options (VOLCANIC_ROCK and VOLCANIC_ROCK_VOUCHERS); oversaw and merged the different strategies developed by team members for submission. 
+
 [**your name**](your link): your contribution (e.g. developed strategy for product X in round X, developed all manual strategies, developed options strategy...)
 
-[**Karin Nakanishi**](https://www.linkedin.com/in/karin-nakanishi/): Developed the utility functions and the structure of `Trader` class during the Tutorial round; developed the trading strategies in every round except for Round 3 (options); oversaw and merged the different strategies developed by team members for submission. 
-
-
-Honourable mention: Jasper's backtester (link)
+Honourable mention: [**Jasper's backtester**](https://github.com/jmerle/imc-prosperity-3-backtester)
 
 ## Project Overview
 This repository contains the code we used in the IMC Prosperity3 challenge.
@@ -52,18 +51,18 @@ With this, we are ready to dive into the competition! 💹
 
 In Round 1, three products are traded in the exchange: RAINFOREST_RESIN, KELP and SQUID_INK. 
 
-The fairprice of RAINFOREST_RESIN is constant at 10000 according to the market-making bots, but there is some noise around this value due to other bots placing orders below and above this price. Market-taking around this constant fairprice has worked very well, but we could further improve our PnL by market-making - placing bids below and asks above this price. We also cleared our positions by buying and selling at the fairprice when approaching the position limit. This has helped a little, but there was a trade-off between clearing too early (missing out on profitable trades) vs clearing too late (reaching and staying at the position limit for some time).
+The fairprice of RAINFOREST_RESIN is constant at 10000 according to the market-making bots, but there is some noise around this value due to other bots placing orders below and above this price. Market-taking around this constant fairprice has worked very well, but we could further improve our PnL by market-making - placing bids below and asks above this price. We also cleared our positions by buying and selling at the fairprice when approaching the position limit. This has helped a little, but there was a trade-off between clearing too early (missing out on profitable trades) vs clearing too late (reaching and staying at the position limit for some time). With this, we could rake in a stable ~35k profit every round.
 
-For KELP, we again calculated the fairprice as the one specified by the market-making bots. Market-taking and -making around this fairprice worked well. We also cleared our positions when it was beyond a certain limit, but made sure to impose a minimum profit of 1 unit against the outstanding orders.
+For KELP, we again calculated the fairprice as the one specified by the market-making bots. Market-taking and -making around this fairprice worked well. We also cleared our positions when it was beyond a certain limit, but made sure to impose a minimum profit of 1 unit against the outstanding orders. Even though the algo worked well, since the price fluctuations of KELP was small, the profit was stable but small, at around 5k every round. 
 
-SQUID was highly volatile and had sudden, large spike/drop in prices. Based on the hint, we tried different mean-reversion approaches like Z-score and Ornstein-Uhlenbeck process, but found it difficult to correctly identify the signals.
+SQUID was highly volatile and had sudden, large spike/drop in prices. Based on the hint, we tried different mean-reversion approaches like Z-score and Ornstein-Uhlenbeck process, but found it difficult to correctly identify the signals. As a result, our profit from SQUID fluctuated quite a bit.
 
 </details>
 
 <details>
 <summary><h3> 🧺 Round 2 </h3></summary>
 
-In Round 2, the idea of ETF and synthetic was introduced. We could trade two PICNIC_BASKETs which corresponded to ETFs, as well as their contents CROISSANTS, JAMS and DJEMBES. As a first attempt, we tried to trade the spread between the basket and their underlying synthetic price, trading each spread independently. However, since the two baskets have similar contents and are highly correlated, we thought it made more sense to trade them together. Some research revealed that with a hedge ratio of ~2, the spread between the two baskets is much more mean-reverting than the individual spread. We thus switched to a pair-trading strategy in Round 5, hedging one basket with the other. This strategy turned out to work much better across different days in backtesting. 
+In Round 2, the idea of ETF and synthetic was introduced. We could trade two PICNIC_BASKETs which corresponded to ETFs, as well as their contents CROISSANTS, JAMS and DJEMBES. As a first attempt, we tried to trade the spread between the basket and their underlying synthetic price, trading each spread independently. However, since the two baskets have similar contents and are highly correlated, we thought it made more sense to trade them together. Some research revealed that with a hedge ratio of ~2, the spread between the two baskets is much more mean-reverting than the individual spread. We thus switched to a pair-trading strategy in Round 5, hedging one basket with the other. This strategy turned out to work much better across different days in backtesting, raking in 20~30k of profit each day.
 
 </details>
 
@@ -80,6 +79,17 @@ Round 3 was all about options. We could trade the products VOLCANIC_ROCK_COUPON_
 <details>
 <summary><h3> 🍪 Round 4 </h3></summary>
 
-Round 4 was somewhat strange. A new product was introduced: MAGNIFICENT_MACARONS. 
+The new product in Round 4 was MAGNIFICENT_MACARONS. Inspired by Prosperity 2, we investigated the arbitrage opportunities, which is to import from Pristine Cuisine at a cheaper price and sell them on the island exchange. However, unlike in Prosperity 2, there was now a conversion limit imposed, which heavily limited the volume. We only managed to produce around 5k profit with this simple arbitrage method. A much more important factor highlighted in the hint given by IMC seemed to be the sunlight index. We saw that a sharp change in the sunlight index when it is below a critical value of ~35 indicates a large drop in the macaron price. Therefore, we used this as a sell signal, and exited the short position once the sunlight index is back to above 45. 
 
 </details>
+
+
+<details>
+<summary><h3> 🕵🏻‍♀️ Round 5 </h3></summary>
+
+This was a very nice round. We obtained information about our counterparties. In particular, the data provided showed that Olivia consistently had the knowledge about the global minimum and maximum in a trading day, so we relied on her signal for SQUID_INK and CROISSANTS, only buying (selling) within a certain range from this global min (max). This had worked quite well, and Lady Olivia helped us gain ~18k with the two assets combined. She also traded KELP, but we found that since the price variation in KELP was not large, we could actually make more profit by market-making and taking instead of waiting for Olivia's signal. 
+
+</details>
+
+
+Unfortunately, we had some slippage from typos and other technical issues in the earlier rounds, but we managed to end the competition with the rankings 7/49 in Switzerland and 360/12620 globally (top 3%)! 🎉🤑
