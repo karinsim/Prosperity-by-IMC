@@ -5,9 +5,9 @@ The IMC Prosperity3 challenge is a 15-day trading competition in a virtual marke
 There is also a manual trading component to the challenge, in which game theory and the intuitive anticipation of actions of a large set of equally informed players were crucial to success. 
 
 ## The team and their contributions
-[**Karin Nakanishi**](https://www.linkedin.com/in/karin-nakanishi/): Developed the utility functions and the structure of `Trader` class during the Tutorial round; analysed trading signals and developed strategies for all assets except for the options (VOLCANIC_ROCK and VOLCANIC_ROCK_VOUCHERS); oversaw and merged the different strategies developed by team members for submission. 
+[**Karin Nakanishi**](https://www.linkedin.com/in/karin-nakanishi/): Developed the utility functions and the structure of `Trader` class before the start of the competition; analysed trading signals and developed strategies for all assets except for the options; oversaw and merged the different strategies developed by team members for submission. 
 
-[**Yannick Kohler**](your link): Implemented a range of algorithms with the goal of supporting the team in finding the optimal approach in the manual trading challanges as well as implementing the options strategy to exploit temporary mispricings of call options as judged by the deviation of the implied volatility from the historic IV smile curve.
+[**Yannick Kohler**](your link): Implemented the algorithms used in the manual trading part; developed the options trading strategy.
 
 [**your name**](your link): your contribution (e.g. developed strategy for product X in round X, developed all manual strategies, developed options strategy...)
 
@@ -50,7 +50,7 @@ With this, we are ready to dive into the competition! 💹
 
 <details>
 <summary><h3> 🦑 Round 1 </h3></summary>
-<summary><h4> Automated trading </h4></summary>
+<summary><h4> Algorithmic trading </h4></summary>
 In Round 1, three products are traded in the exchange: RAINFOREST_RESIN, KELP and SQUID_INK. 
 
 The fairprice of RAINFOREST_RESIN is constant at 10000 according to the market-making bots, but there is some noise around this value due to other bots placing orders below and above this price. Market-taking around this constant fairprice has worked very well, but we could further improve our PnL by market-making - placing bids below and asks above this price. We also cleared our positions by buying and selling at the fairprice when approaching the position limit. This has helped a little, but there was a trade-off between clearing too early (missing out on profitable trades) vs clearing too late (reaching and staying at the position limit for some time). With this, we could rake in a stable ~35k profit every round.
@@ -61,68 +61,64 @@ SQUID was highly volatile and had sudden, large spike/drop in prices. Based on t
 
 
 <summary><h4> Manual trading </h4></summary>
-This round's manual trading challenge was about exploiting mispricings in the exchange rate of different assets. A total of five Assets were given, which could be exchanged for one another at fixed exchange rates. In up to five trades, the players were supposed to increase their starting capital as much as possible and return back to the original asset. The total number of possible combinations with up to 5 trades was therefore 5^4 or 624, a number that could certainly be fairly easily be calculated explicitly, but due to the exponential nature of the computing demand of such an algorithm, did we, in the spirit of generalizability, opt for an algorithm that went round by round, that after every trade evaluate the path that would lead to the greatest quantity in any given good which then only those would be considered in the following round of trades. This little change brought us from O(n^k) to O(n^2*k).
-Unsurprisingly did we as well as many other teams found this deterministic best solution, and we were tied for first place with a few hundred other teams.
+This round's manual trading challenge was about exploiting mispricings in the exchange rate of different assets. A total of five assets were given, which could be exchanged for one another at fixed exchange rates. In up to five trades, players aimed to maximise their starting capital and return to the original asset. We employed a dynamic programming algorithm with complexity O(k*n^2).
+Unsurprisingly did we as well as many other teams found this deterministic best solution, and we were tied for first place with thousands of other teams.
 
 </details>
 
 <details>
 <summary><h3> 🧺 Round 2 </h3></summary>
-<summary><h4> Automated trading </h4></summary>
+<summary><h4> Algorithmic trading </h4></summary>
 In Round 2, the idea of ETF and synthetic was introduced. We could trade two PICNIC_BASKETs which corresponded to ETFs, as well as their contents CROISSANTS, JAMS and DJEMBES. As a first attempt, we tried to trade the spread between the basket and their underlying synthetic price, trading each spread independently. However, since the two baskets have similar contents and are highly correlated, we thought it made more sense to trade them together. Some research revealed that with a hedge ratio of ~2, the spread between the two baskets is much more mean-reverting than the individual spread. We thus switched to a pair-trading strategy in Round 5, hedging one basket with the other. This strategy turned out to work much better across different days in backtesting, raking in 20~30k of profit each day.
 
 <summary><h4> Manual trading </h4></summary>
-Next up in the manual trading challenge was the scenario that there was a set of containers with a known amount of money to be paid out by the end of the round, which would be split among all players which decided for the same container. The challenge here arose from the fact that all players had to choose at the same time, so the behaviour of the crowd had to be anticipated to not end up in an overcrowded container.
-Additionally, was already given the number of "inhabitants" for each container, which would also participate in the price share.
-(e.g. if the container holds 800'000, there are 6 inhabitants and 12% of all teams decided to go with this container, each team would get 800k/(6+12) = 44'444)
-Also, there was the option to participate in a second prize pool for a cost of 50k, which was far above the average payoff of 34k in case the total winnings were distributed equally among all inhabitants and player teams, with large down side posiblilities and fairly limited upside so we decided against a second container.
-Since we had little in the way of anticipating choices of other players did we decided to tend to go with a larger price pool, since the impact of small changes of player percentage should change little to nothing. Also, the number of inhabitants would surely play a significant part in the final split, so we looked for a container that had a good initial price pool/inhabitant ratio, whilst still not being an outlier, since that would most likely attract too much attention from other teams. 
-We also ran a linear regression on the data from last year's challenge, which was functionally the same with different numbers, which also suggested mid to large-sized containers with a mid to high P/I ratio, with an R^2 of 0.85.
-So we went with the 800k payoff and 6 inhabitant container, which gave us a P/I ratio of 133.3k (Payoff ranged from 100k to 900k and P/I ratio from 182.5k to 100k, which were heavily skewed towards 100k)
+In the next manual trading challenge, players chose from containers with fixed payouts, split among all teams and "inhabitants" selecting the same one. Since choices were made simultaneously, anticipating others’ behaviour was key to avoiding overcrowded containers.
 
-We did end up in a solid middle field of other players with similar final payoffs as we got, but notably, from the results was that the best-performing as well as the worst-performing containers showcased surprisingly similar characteristics, small price pools and midling P/I ratios, which is in alignment with our approach, that small random deviations in the player choices would lead to a large variance in their payoffs, making our choice the less profitable, yet more risk averse choice.
+Each container’s payout was divided by the total of teams and inhabitants. A second prize pool option cost 50k—well above the average expected return of 34k—offering high risk and limited upside, so we avoided it.
+With little insight into others’ choices, we preferred containers with larger payouts and good payout-to-inhabitant (P/I) ratios, avoiding outliers likely to attract too many teams. A linear regression on last year’s similar data ($R^2 = 0.85$) supported targeting mid-to-large containers with mid-to-high P/I ratios.
+We chose the 800k/6-inhabitant container (P/I = 133.3k), within the range of 100k–182.5k and skewed toward the lower end. Our result landed us in the middle of the field. Interestingly, both top- and bottom-performing containers had small payouts and middling P/I ratios—-supporting our risk-averse approach favouring stable returns over high variance.
 </details>
 
 
 <details>
 <summary><h3> 🪨 Round 3 </h3></summary>
-<summary><h4> Automated trading </h4></summary>
-Round 3 was all about options. We could trade the products VOLCANIC_ROCK_COUPON_N corresponding to different strike prices N, as well as the underlying asset, VOLCANIC_ROCK. Our first approach was to simply price the options independently with Black Sholes based on historic volatility (which was fairly constant). This approach did not work out since the Implied volatilities that one gets from numerically inverting BS were substantially and systematically lower than the historical volatilities. We also noted that there was a very pronounced IV smile in the given training data. So we decided to change course and decided to infer an IV curve, based on which we would then determine the volatility to be used in BS, which then would give us the fair price prediction.
-Turns out, the way IMC seemingly has implemented their options pricing was that the IV smile didn't gradually change, but it got step-wise sharper with each day.
-Since we saw the IV smile being constant over the full training set, didn't we allow for any possible changes in shape over time, which in turn lead to our model supposing vastly too high volatilities for options close to on the money and vastly too low volatilities for options deep out/in the money. This error in assumptions led to us basically going all in on purchasing ATM options and selling OTM/ITM options right up to the position limits, which led to massive losses for us during that round.
-We later on corrected that by basically basing our IV Estimate on a weighted average of the IV smile of previous timesteps, which gave our model the ability to adapt in a very flexible and responsive way to any possible change in shape or position of the volatility smile, while still not overfitting to previous mispricings.
+<summary><h4> Algorithmic trading </h4></summary>
+Round 3 was all about options. We could trade the products VOLCANIC_ROCK_COUPON_N corresponding to different strike prices N, as well as the underlying asset, VOLCANIC_ROCK. Our first approach was to simply price the options independently with Black-Scholes based on historic volatility (which was fairly constant). This approach did not work out since the implied volatilities that one gets from numerically inverting BS were substantially and systematically lower than the historical volatilities. We also noted that there was a very pronounced IV smile in the given training data. So we decided to change course and infer an IV curve, based on which we would then determine the volatility to be used in BS, which would give us the fair price prediction.
+
+It turns out, the way IMC seemingly implemented their options pricing was that the IV smile didn't gradually change, but became step-wise sharper with each day. Since we saw the IV smile being constant over the full training set, we didn’t allow for any possible changes in shape over time, which in turn led to our model supposing vastly too high volatilities for options close to at-the-money and vastly too low volatilities for options deep out/in-the-money. This error in assumptions led to us basically going all-in on purchasing ATM options and selling OTM/ITM options right up to the position limits, which led to massive losses for us during that round.
+
+We later corrected that by basing our IV estimate on a weighted average of the IV smile of previous timesteps, which gave our model the ability to adapt in a very flexible and responsive way to any possible change in shape or position of the volatility smile, while still not overfitting to previous mispricings.
 
 <summary><h4> Manual trading </h4></summary>
-The setup for this round's manual trade was that we could bid any amount between 160 and 320 to purchase a good, which would then be turned around and sold at a fixed price of 320 per unit, so the delta between buy and sell would need to be optimized. Now the thing is that you can only offer two prices you are willing to pay for the goods, and for each price all market participants, who had a reserve price lower than the price you're offering, and still have the good, will sell it to you at your proposed price.
-We also knew that the reserve prices of the market participants were uniformly distributed on the intervals [160, 200] and [250, 320].
-(I.e. if we set a first offer at 200, we'd trade with 40/110 of willing market participants and we'd make a profit of 320-200 for every item.)
-The additional difficulty here was that the willingness to trade with us at the second bid price would quickly deteriorate if our bid was below the average of all second bids.
-So we calculated for all possible values of the average second bid from 200 up to 320, which value would lead to the highest payoff. We found that for all cases the first bid would be best placed at 200 (since everything in the interval (200, 250) would simply reduce our unit profits, whilst not increasing the number of goods traded) and the second bid would be idealy placed at the maximum between 285 and the average bid. Also, we implemented a sensitivity map, which gave us the bands for the second bid, which would correspond to 95%, 90%, 85%, and 80% of the max profit. We found that the sensitivity of the profit in a downside direction was vastly greater, so we would rather slightly over-estimate than under-estimate the average bid.
-Since 285 was the lower sensible limit for the second bid, and we were convinced that most other teams would find that solution as well have we deliberately decided to go slightly above to ensure ourselves against being under the average bid. We ended up going with bids at 200 and 292, which did leave >5% of possible profit in the second trade on the table, for the peace of mind of having fairly significant upside protection.
-The results from this round were that the average bids were at 201 and 286. The histogram shows that the majority of teams came to a similar view as we did, but still a large proportion of players had placed their bids on the interval of (200, 285), which again, didn't make any mathematical sense in any scenario.
+In this round’s manual trade, we could place two bids between 160 and 320 to buy a good, which would then be sold at a fixed price of 320. Sellers with reserve prices below our bids would sell to us at our offered prices. Reserve prices were uniformly distributed in [160, 200] and [250, 320].
+The first bid had no reason to be above 200, as prices between 200 and 250 reduced profit without increasing volume. The second bid, however, had to account for market dynamics—its effectiveness declined sharply if it fell below the average of all second bids.
+We calculated the optimal strategy across all possible average second bids and found the second bid should be set at max(285, expected average). Sensitivity analysis showed profit dropped off more steeply when underestimating the average, so overestimating was safer.
+Assuming others would also settle on 285, we bid slightly higher at 292 to avoid falling below average. This sacrificed a small portion of potential profit for greater downside protection.
+The results showed that average bids were 201 and 286, validating our strategy. Most teams had similar logic, though many placed second bids between 200 and 285, which made no mathematical sense in any scenario.
 </details>
 
 
 <details>
 <summary><h3> 🍪 Round 4 </h3></summary>
-<summary><h4> Automated trading </h4></summary>
+<summary><h4> Algorithmic trading </h4></summary>
 The new product in Round 4 was MAGNIFICENT_MACARONS. Inspired by Prosperity 2, we investigated the arbitrage opportunities, which is to import from Pristine Cuisine at a cheaper price and sell them on the island exchange. However, unlike in Prosperity 2, there was now a conversion limit imposed, which heavily limited the volume. We only managed to produce around 5k profit with this simple arbitrage method. A much more important factor highlighted in the hint given by IMC seemed to be the sunlight index. We saw that a sharp change in the sunlight index when it is below a critical value of ~35 indicates a large drop in the macaron price. Therefore, we used this as a sell signal, and exited the short position once the sunlight index is back to above 45. 
 
 <summary><h4> Manual trading </h4></summary>
-Round 4 of manual trading followed a very similar format as round 2, now simply the number of options was increased, and any team could participate in up to 3 price pools (for 0, 50k, and 150k additional cost, respectively). With the new Numbers, we got an average payoff of 57k, which is why we decided on going for two price pools this time around and we went with a similar decision process as before, under the assumption that there would be a significant influx towards the lower price pools, in an anticipated repetition of the resuls from round 2.
+Round 4 of manual trading followed a very similar format to Round 2, with the main change being an increased number of options. Any team could now participate in up to three prize pools (for 0, 50k, and 150k additional cost, respectively). With the new numbers, we calculated an average payoff of 57k, which is why we decided to go for two prize pools this time, using a similar decision process as before, under the assumption that there would be a significant influx towards the lower prize pools, in an anticipated repetition of the results from Round 2.
 
 </details>
 
 
 <details>
 <summary><h3> 🕵🏻‍♀️ Round 5 </h3></summary>
-
+<summary><h4> Algorithmic trading </h4></summary>
 This was a very nice round. We obtained information about our counterparties. In particular, the data provided showed that Olivia consistently had the knowledge about the global minimum and maximum in a trading day, so we relied on her signal for SQUID_INK and CROISSANTS, only buying (selling) within a certain range from this global min (max). This had worked quite well, and Lady Olivia helped us gain ~18k with the two assets combined. She also traded KELP, but we found that since the price variation in KELP was not large, we could actually make more profit by market-making and taking instead of waiting for Olivia's signal. 
 
 <summary><h4> Manual trading </h4></summary>
-In this last manual trading round, we were supplied with a newsletter, which had a set of 9 companies' relevant news, which weren't yet priced in, and we were supposed to estimate the market reaction and trade accordingly. An additional difficulty was the proper accounting for trading fees, since they were exponentially increasing with position size. We therefore implemented an algorithm that, for a given market scenario, would calculate the optimal response. The problem was just how one would get an accurate estimate of the market response? We went for an independent expert estimate approach, so all team members independently estimated an anticipated market move, which we then averaged and used as the basis of the market scenario, which was then fed into the model.
+In this last manual trading round, we were supplied with a newsletter containing relevant news for nine companies, which weren’t yet priced in, and we were supposed to estimate the market reaction and trade accordingly. An additional difficulty was properly accounting for trading fees, as they increased exponentially with position size. We therefore implemented an algorithm that, for a given market scenario, would calculate the optimal response. The challenge was how to accurately estimate the market reaction. We chose an independent expert estimate approach, where all team members independently estimated the anticipated market move, which we then averaged and used as the basis for the market scenario fed into the model.
 This round of manual trading again turned out to be fairly profitable.
+
 </details>
 
-
-Unfortunately, we had some slippage from typos and other technical issues in the earlier rounds, but we managed to end the competition with the rankings 7/49 in Switzerland and 360/12620 globally (top 3%)! 🎉🤑
+All in all, it was a fun challenge and we learned a lot.
+We had some technical issues in the earlier rounds leading to some unfortunate slippage, but we managed to end the competition with the rankings 7/49 in Switzerland and 360/12620 globally (top 3%)! 🎉🤑
