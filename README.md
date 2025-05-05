@@ -119,6 +119,8 @@ In this last manual trading round, we were supplied with a newsletter containing
 This round of manual trading again turned out to be fairly profitable.
 
 </details>
-
+<p align="center">
+<img src="final.png" alt="EndResult" width="400"/>
+</p>
 All in all, it was a fun challenge and we learned a lot.
 We had some technical issues in the earlier rounds leading to some unfortunate slippage, but we managed to end the competition with the rankings 7/49 in Switzerland and 360/12620 globally (top 3%)! 🎉🤑
