@@ -9,7 +9,7 @@ There is also a manual trading component to the challenge, in which game theory 
 
 [**Yannick Kohler**](your link): Implemented the algorithms used in the manual trading part; developed the options trading strategy.
 
-[**your name**](your link): your contribution (e.g. developed strategy for product X in round X, developed all manual strategies, developed options strategy...)
+[**Julian**]: Focused on optimizing the options trading strategies, particularly by incorporating and analyzing implied volatility; tested the core trading code throughout the competition; actively involved in the manual trading challenges.
 
 Honourable mention: [**Jasper's backtester**](https://github.com/jmerle/imc-prosperity-3-backtester)
 
