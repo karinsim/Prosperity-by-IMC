@@ -5,11 +5,11 @@ The IMC Prosperity3 challenge is a 15-day trading competition in a virtual marke
 There is also a manual trading component to the challenge, in which game theory and the intuitive anticipation of actions of a large set of equally informed players were crucial to success. 
 
 ## The team and their contributions
-[**Karin Nakanishi**](https://www.linkedin.com/in/karin-nakanishi/): Developed the utility functions and the structure of `Trader` class before the start of the competition; analysed trading signals and developed strategies for all assets except for the options; oversaw and merged the different strategies developed by team members for submission. 
+[**Karin Nakanishi**](https://www.linkedin.com/in/karin-nakanishi/): Developed the utility functions and the structure of `Trader` class before the start of the competition; analysed trading signals and developed strategies for all assets except for options; oversaw and merged the different strategies developed by team members for submission. 
 
-[**Yannick Kohler**](your link): Implemented the algorithms used in the manual trading part; developed the options trading strategy.
+**Yannick Kohler**: Implemented the algorithms used in the manual trading part; developed the options trading strategy by exploiting the deviation of the implied volatility from the historic curve.
 
-[**Julian**]: Focused on optimizing the options trading strategies, particularly by incorporating and analyzing implied volatility; tested the core trading code throughout the competition; actively involved in the manual trading challenges.
+**Julian**: Optimized the options trading strategies by incorporating and analyzing implied volatility; actively involved in the manual trading challenges.
 
 Honourable mention: [**Jasper's backtester**](https://github.com/jmerle/imc-prosperity-3-backtester)
 
